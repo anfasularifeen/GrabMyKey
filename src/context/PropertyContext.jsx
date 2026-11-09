@@ -1,27 +1,87 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { mockProperties } from '../data/mockProperties';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { fetchProperties } from '../api';
 
 const PropertyContext = createContext();
 
-export function PropertyProvider({ children }) {
-  // Initialized with cached properties or robust mockProperties collection
-  const [properties, setProperties] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('grabmykey_properties');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {
-        console.warn('Failed to parse cached properties', e);
-      }
+// Automatically purge legacy mock properties from localStorage cache
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('grabmykey_properties');
+    if (saved && (
+      saved.includes('Coastal Horizon') ||
+      saved.includes('Kadri Heights') ||
+      saved.includes('Bejai Royal') ||
+      saved.includes('Ullal Sovereign') ||
+      saved.includes('dQw4w9WgXcQ')
+    )) {
+      localStorage.removeItem('grabmykey_properties');
     }
-    return mockProperties;
-  });
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+export function PropertyProvider({ children }) {
+  // Wipe default initial states: strictly start empty []
+  const [properties, setProperties] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Live Backend API Synchronization exclusively from Express
+  const loadPropertiesFromApi = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const res = await fetchProperties();
+      if (res?.data && Array.isArray(res.data)) {
+        setProperties(res.data);
+        return res.data;
+      } else {
+        setProperties([]);
+        return [];
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to fetch properties from server');
+      console.warn('[PropertyContext] Live API fetch error:', err?.message || err);
+      setProperties([]);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    let isMounted = true;
+    (async () => {
+      try {
+        setIsLoading(true);
+        const res = await fetchProperties();
+        if (isMounted) {
+          if (res?.data && Array.isArray(res.data)) {
+            setProperties(res.data);
+          } else {
+            setProperties([]);
+          }
+        }
+      } catch (err) {
+        console.warn('[PropertyContext] Initial mount backend fetch error:', err?.message || err);
+        if (isMounted) {
+          setProperties([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && Array.isArray(properties)) {
       localStorage.setItem('grabmykey_properties', JSON.stringify(properties));
     }
   }, [properties]);
@@ -68,22 +128,19 @@ export function PropertyProvider({ children }) {
     }
   };
 
-  const resetToMockProperties = () => {
-    setProperties(mockProperties);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('grabmykey_properties', JSON.stringify(mockProperties));
-    }
-  };
-
   return (
     <PropertyContext.Provider value={{
       properties,
       setProperties,
+      isLoading,
+      error,
+      refreshProperties: loadPropertiesFromApi,
+      reloadProperties: loadPropertiesFromApi,
+      resetToMockProperties: loadPropertiesFromApi,
       addProperty,
       updateProperty,
       deleteProperty,
-      clearAllProperties,
-      resetToMockProperties
+      clearAllProperties
     }}>
       {children}
     </PropertyContext.Provider>
@@ -94,13 +151,17 @@ export const useProperties = () => {
   const context = useContext(PropertyContext);
   if (!context) {
     return {
-      properties: mockProperties,
+      properties: [],
       setProperties: () => {},
+      isLoading: false,
+      error: null,
+      refreshProperties: async () => [],
+      reloadProperties: async () => [],
+      resetToMockProperties: async () => [],
       addProperty: () => {},
       updateProperty: () => {},
       deleteProperty: () => {},
-      clearAllProperties: () => {},
-      resetToMockProperties: () => {}
+      clearAllProperties: () => {}
     };
   }
   return context;

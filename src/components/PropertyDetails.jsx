@@ -30,30 +30,12 @@ const getYouTubeWatchUrl = (url) => {
     : url;
 };
 
-// Safe fallback specs generator
+// Dynamic specs generator from property fields
 const getDefaultSpecs = (prop) => {
   if (!prop) {
     return {
-      inventorySpecs: {
-        bedrooms: 0,
-        bathrooms: 0,
-        halls: "N/A",
-        garden: "N/A",
-        furnishing: "N/A",
-        furnitureAppliances: "N/A",
-        kitchenType: "N/A",
-        parking: "N/A",
-        balconies: "N/A",
-        flooring: "N/A",
-        powerBackup: "N/A",
-        waterSupply: "N/A"
-      },
-      technicalSpecs: {
-        roadWidth: "N/A",
-        powerBackup: "N/A",
-        waterSource: "N/A",
-        zoning: "N/A"
-      },
+      inventorySpecs: {},
+      technicalSpecs: {},
       connectivity: [],
       financials: {
         monthlyRental: "N/A",
@@ -66,54 +48,41 @@ const getDefaultSpecs = (prop) => {
   }
 
   const isCommercial = prop?.type === 'Commercial' || prop?.category === 'Commercial';
-  const isEstate = prop?.type === 'Estate' || prop?.category === 'Estate';
   const isPlot = prop?.type === 'Plot / Land' || prop?.type === 'Plot' || prop?.category === 'Plot' || prop?.category === 'Land/Plot';
-  const priceVal = prop?.priceRaw || prop?.pricing?.expectedPrice || (parseInt((prop?.price || '').replace(/[^0-9]/g, '')) * 100000) || 25000000;
-  const stampDutyVal = `8.0% (~₹${(priceVal * 0.08 / 100000).toFixed(1)} Lakhs)`;
-  const estRent = `₹${Math.round(priceVal * (isCommercial ? 0.006 : 0.0035)).toLocaleString('en-IN')} / mo`;
+  const priceVal = prop?.priceRaw || prop?.pricing?.expectedPrice || (parseInt((prop?.price || '').replace(/[^0-9]/g, ''), 10) * 100000) || 0;
+  const stampDutyVal = priceVal ? `8.0% (~₹${(priceVal * 0.08 / 100000).toFixed(1)} Lakhs)` : 'N/A';
+  const estRent = priceVal ? `₹${Math.round(priceVal * (isCommercial ? 0.006 : 0.0035)).toLocaleString('en-IN')} / mo` : 'N/A';
 
   const inventorySpecs = prop?.inventorySpecs || {
-    bedrooms: isPlot ? 0 : (prop?.specs?.bedrooms ?? prop?.beds ?? (isCommercial ? 0 : isEstate ? 5 : 4)),
-    bathrooms: isPlot ? 0 : (prop?.specs?.bathrooms ?? prop?.baths ?? (isCommercial ? 2 : isEstate ? 6 : 5)),
-    halls: isPlot ? "N/A - Plot Asset" : (isCommercial ? "3 (Reception + Workstation Hall + Boardroom)" : "2 (Formal Living + Lounge)"),
-    garden: isPlot ? "Open Land Parcel" : (isCommercial ? "No (Terrace Access)" : "Yes (Private Landscaped Lawn)"),
-    furnishing: isPlot ? "Unfurnished (Plot)" : (isCommercial ? "Semi-Furnished (Workstation Ready)" : (prop?.specs?.furnishingStatus || "Fully Furnished")),
-    furnitureAppliances: isPlot 
-      ? "N/A - Open Land Parcel Ready for Immediate Construction"
-      : isCommercial 
-      ? "16 Ergonomic Workstations, Boardroom Table, 3 Cassette ACs, Server Rack" 
-      : isEstate
-      ? "Antique Rosewood Chairs, 4-Poster Teak Beds, Traditional Brass Lamps, Modern Appliances"
-      : "Teakwood Dining Table with 6 Chairs, Italian Leather Sofas, 5 Inverter ACs, Smart Refrigerator, Home Theater",
-    kitchenType: isPlot ? "N/A" : (isCommercial ? "Pantry & Cafeteria Nook with Microwave Station" : "Modular Italian Kitchen with Island Hob & Hood"),
-    parking: isPlot ? "Direct Access Driveway" : (isCommercial ? "2 Reserved Underground Basement Slots" : isEstate ? "Covered Portico for 4 SUVs" : "2 Covered Slots + EV Fast Charger"),
-    balconies: isPlot ? "N/A" : (isCommercial ? "1 Road-Facing Executive Veranda" : isEstate ? "Wrap-Around Heritage Verandahs" : "3 Sea-Facing Sundecks"),
-    flooring: isPlot ? "Natural Ground / Graded" : (isCommercial ? "Heavy-Duty Vitrified Commercial Tiles" : isEstate ? "Terracotta & Polished Teakwood Planks" : "Italian Marble & Teakwood Parquet"),
-    powerBackup: isCommercial ? "25KW 3-Phase + 100% Dedicated DG Failover" : "15KW 3-Phase + 100% Generator Backup",
-    waterSupply: isEstate ? "Mountain Stream + Spring Well" : "Open Well + City Corporation Supply"
+    bedrooms: isPlot ? 0 : (prop?.specs?.bedrooms ?? prop?.beds ?? 0),
+    bathrooms: isPlot ? 0 : (prop?.specs?.bathrooms ?? prop?.baths ?? 0),
+    halls: isPlot ? "N/A - Plot Asset" : (prop?.specs?.halls || "Standard"),
+    garden: isPlot ? "Open Land Parcel" : (prop?.specs?.garden || "N/A"),
+    furnishing: prop?.specs?.furnishingStatus || prop?.furnishing || "Unfurnished",
+    furnitureAppliances: prop?.specs?.furnitureAppliances || "Standard",
+    kitchenType: isPlot ? "N/A" : (prop?.specs?.kitchenType || "Standard"),
+    parking: prop?.specs?.parking || "Standard Access",
+    balconies: isPlot ? "N/A" : (prop?.specs?.balconies || "N/A"),
+    flooring: prop?.specs?.flooring || "Standard",
+    powerBackup: prop?.specs?.powerBackup || prop?.powerBackup || "Standard",
+    waterSupply: prop?.specs?.waterSupply || prop?.waterSupply || "Municipal / Well"
   };
 
   const technicalSpecs = prop?.technicalSpecs || {
-    roadWidth: isCommercial ? "60ft Four-Lane Arterial Road" : isEstate ? "30ft Paved Plantation Access" : "40ft Tar Road",
-    powerBackup: isCommercial ? "3-Phase 25KW + 100% Dedicated DG" : isEstate ? "3-Phase 20KW + Solar Hybrid" : "3-Phase 15KW + 100% DG Backup",
-    waterSource: isEstate ? "Perennial Stream + Well" : "Open Well + Corporation Supply",
-    zoning: isCommercial ? "Commercial Khata A Approved" : isEstate ? "Freehold Plantation (Non-EFL)" : "Residential / RERA Approved"
+    roadWidth: prop?.roadWidth || "Standard Approach",
+    powerBackup: prop?.powerBackup || "Standard",
+    waterSource: prop?.waterSupply || "Standard",
+    zoning: prop?.zoning || "Approved"
   };
 
-  const connectivity = (Array.isArray(prop?.connectivity) && prop.connectivity.length > 0) ? prop.connectivity : [
-    { label: "Mangaluru Intl Airport (IXE)", distance: "14 km • 20 mins", type: "airport" },
-    { label: "National Highway (NH-66 / Coastal Corridor)", distance: "1.2 km • 3 mins", type: "highway" },
-    { label: "Main Railway Junction", distance: "6.5 km • 12 mins", type: "railway" },
-    { label: "Super-Specialty Hospital", distance: "3.5 km • 8 mins", type: "hospital" },
-    { label: "International School / University", distance: "2.8 km • 6 mins", type: "school" }
-  ];
+  const connectivity = Array.isArray(prop?.connectivity) ? prop.connectivity : [];
 
   const financials = prop?.financials || {
-    monthlyRental: isPlot ? "N/A (Capital Appreciation Asset)" : estRent,
-    rentalYield: isPlot ? "12.0% - 15.0% Capital Yield" : (isCommercial ? "7.2% Commercial Yield" : "4.5% - 5.2% Gross Yield"),
-    propertyTax: `₹${isCommercial ? '24,000' : '18,500'} / year (Municipal SAS)`,
+    monthlyRental: isPlot ? "N/A (Capital Asset)" : estRent,
+    rentalYield: prop?.investmentAnalysis?.rentalYieldEst || (priceVal ? (isCommercial ? "7.0% - 8.5%" : "4.0% - 5.5%") : "N/A"),
+    propertyTax: priceVal ? `₹${isCommercial ? '24,000' : '18,500'} / yr` : "N/A",
     stampDuty: stampDutyVal,
-    appreciation: isEstate || isPlot ? "12.5% - 15.0% Y-o-Y" : "11.2% - 13.5% Y-o-Y"
+    appreciation: prop?.investmentAnalysis?.resaleAppreciationEst || "10.0% - 13.0% Y-o-Y"
   };
 
   return { inventorySpecs, technicalSpecs, connectivity, financials };
@@ -139,14 +108,7 @@ export const getTransitIcon = (mode, name = '') => {
 };
 
 export function NearbyInfrastructure({ property, className = "" }) {
-  const transitList = property?.transitMatrix?.length > 0 
-    ? property.transitMatrix 
-    : [
-        { landmarkName: "Mangaluru International Airport (IXE)", travelMode: "Flight", distanceText: "14.2 km", durationText: "20m" },
-        { landmarkName: "Surathkal Railway Station", travelMode: "Transit", distanceText: "3.5 km", durationText: "8m" },
-        { landmarkName: "NITK Surathkal Campus & Beach", travelMode: "Drive", distanceText: "2.1 km", durationText: "5m" },
-        { landmarkName: "Mangalore City Central / Hampankatta", travelMode: "Drive", distanceText: "17.5 km", durationText: "25m" }
-      ];
+  const transitList = Array.isArray(property?.transitMatrix) ? property.transitMatrix : [];
 
   return (
     <div className={`bg-white rounded-2xl p-6 border border-slate-200/80 space-y-5 shadow-xs ${className}`}>
@@ -158,34 +120,38 @@ export function NearbyInfrastructure({ property, className = "" }) {
 
       {/* Clean Transit List */}
       <div className="space-y-3">
-        {transitList.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between text-xs py-1.5">
-            
-            {/* Left: Icon Tile + Landmark Name */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-[#FAF8F5] border border-slate-200/50 flex items-center justify-center shrink-0 shadow-2xs">
-                {getTransitIcon(item.travelMode || item.transportMode, item.landmarkName || item.destination)}
+        {transitList.length === 0 ? (
+          <p className="text-xs text-slate-500 font-sans py-1">No transit landmarks recorded for this property.</p>
+        ) : (
+          transitList.map((item, idx) => (
+            <div key={idx} className="flex items-center justify-between text-xs py-1.5">
+              
+              {/* Left: Icon Tile + Landmark Name */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-[#FAF8F5] border border-slate-200/50 flex items-center justify-center shrink-0 shadow-2xs">
+                  {getTransitIcon(item.travelMode || item.transportMode, item.landmarkName || item.destination)}
+                </div>
+                <span className="font-semibold text-slate-800 text-xs truncate">
+                  {item.landmarkName || item.destination}
+                </span>
               </div>
-              <span className="font-semibold text-slate-800 text-xs truncate">
-                {item.landmarkName || item.destination}
-              </span>
-            </div>
 
-            {/* Right: Clean Distance & Duration */}
-            <div className="text-right shrink-0 font-medium text-xs text-slate-500 pl-2">
-              <span>{item.distanceText || (item.distanceKm ? `${item.distanceKm} km` : '')}</span>
-              <span className="text-slate-300 mx-1.5">•</span>
-              <span className="text-amber-700 font-bold">{item.durationText || (item.travelTimeMins ? `${item.travelTimeMins}m` : '')}</span>
-            </div>
+              {/* Right: Clean Distance & Duration */}
+              <div className="text-right shrink-0 font-medium text-xs text-slate-500 pl-2">
+                <span>{item.distanceText || (item.distanceKm ? `${item.distanceKm} km` : '')}</span>
+                <span className="text-slate-300 mx-1.5">•</span>
+                <span className="text-amber-700 font-bold">{item.durationText || (item.travelTimeMins ? `${item.travelTimeMins}m` : '')}</span>
+              </div>
 
-          </div>
-        ))}
+            </div>
+          ))
+        )}
       </div>
 
       {/* Footer Details */}
       <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-        <span className="text-slate-500 font-medium">{property?.roadIngressText || '40ft Wide Asphalt Road'}</span>
-        <span className="font-bold text-emerald-700 tracking-wide">{property?.zoningTagText || 'RERA Compliant'}</span>
+        <span className="text-slate-500 font-medium">{property?.roadIngressText || 'Approach Road Frontage'}</span>
+        <span className="font-bold text-emerald-700 tracking-wide">{property?.zoningTagText || 'Title Verified'}</span>
       </div>
 
     </div>
@@ -229,22 +195,22 @@ export default function PropertyDetails({
 
   // Specs & Display Bindings with Safe Fallbacks
   const specs = propSpecsInput || getDefaultSpecs(property);
-  const propDisplayId = property?.id || property?._id || "1";
-  const propDisplaySlug = property?.slug || `gmk-${propDisplayId}`;
+  const propDisplayId = property?.id || property?._id || "";
+  const propDisplaySlug = property?.slug || propDisplayId;
   const propDisplayLocation = property?.locality 
     ? `${property.locality}, ${property.city}` 
     : (property?.location || "Mangaluru");
-  const propDisplayPrice = property?.price || (property?.pricing?.expectedPrice ? (property.pricing.expectedPrice >= 10000000 ? `₹${(property.pricing.expectedPrice / 10000000).toFixed(2)} Cr` : `₹${(property.pricing.expectedPrice / 100000).toFixed(1)} Lakhs`) : '₹1.50 Cr');
-  const propDisplayPriceRaw = property?.priceRaw || property?.pricing?.expectedPrice || 15000000;
-  const propDisplayType = property?.category || property?.type || 'Villa';
+  const propDisplayPrice = property?.price || (property?.pricing?.expectedPrice ? (property.pricing.expectedPrice >= 10000000 ? `₹${(property.pricing.expectedPrice / 10000000).toFixed(2)} Cr` : `₹${(property.pricing.expectedPrice / 100000).toFixed(1)} Lakhs`) : 'Price on Request');
+  const propDisplayPriceRaw = property?.priceRaw || property?.pricing?.expectedPrice || 0;
+  const propDisplayType = property?.category || property?.type || 'Estate';
   const propDisplayArea = property?.specs?.carpetAreaSqFt 
     ? `${property.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft` 
-    : (property?.area || '2,400 sq.ft');
-  const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 4;
-  const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 4;
+    : (property?.area || 'N/A');
+  const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 0;
+  const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 0;
   const propDisplayImages = (property?.galleryImages && property.galleryImages.length > 0)
     ? property.galleryImages
-    : ((property?.images && property.images.length > 0) ? property.images : ['https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80']);
+    : ((property?.images && property.images.length > 0) ? property.images : []);
   const propDisplayVideoUrl = property?.youtubeVideoId 
     ? `https://www.youtube.com/watch?v=${property.youtubeVideoId}` 
     : property?.videoUrl;
@@ -676,7 +642,7 @@ export default function PropertyDetails({
                 Unit Rate
               </div>
               <div className="text-xl font-serif font-bold text-slate-900">
-                ₹{property.sqftPrice || (propDisplayPriceRaw ? Math.round(propDisplayPriceRaw / (parseInt((propDisplayArea || '1').replace(/[^0-9]/g, '')) || 1)).toLocaleString('en-IN') : '9,167')}
+                {property.sqftPrice || (propDisplayPriceRaw && parseInt((propDisplayArea || '0').replace(/[^0-9]/g, '')) > 0 ? `₹${Math.round(propDisplayPriceRaw / parseInt((propDisplayArea || '1').replace(/[^0-9]/g, ''))).toLocaleString('en-IN')}` : 'N/A')}
                 <span className="text-[10px] font-sans text-slate-400 font-normal">/sq.ft</span>
               </div>
             </div>
@@ -686,7 +652,7 @@ export default function PropertyDetails({
                 Est. Rent
               </div>
               <div className="text-xl font-serif font-bold text-slate-900">
-                ₹{(property.rentalEstimate || property?.investmentAnalysis?.rentalYieldEst?.split(' ')[0] || specs?.financials?.monthlyRental || '1.45L').replace(/^₹/, '').replace(' / mo', '')}
+                {(property.rentalEstimate || property?.investmentAnalysis?.rentalYieldEst?.split(' ')[0] || specs?.financials?.monthlyRental || 'N/A').replace(/^₹/, '').replace(' / mo', '')}
                 <span className="text-[10px] font-sans text-slate-400 font-normal">/mo</span>
               </div>
             </div>
@@ -696,7 +662,7 @@ export default function PropertyDetails({
                 Appreciation
               </div>
               <div className="text-xl font-serif font-bold text-amber-700">
-                {property.appreciationRate || (property?.investmentAnalysis?.resaleAppreciationEst ? property.investmentAnalysis.resaleAppreciationEst.split(' ')[0].replace('Compound', '').trim() : '11 - 13%')}
+                {property.appreciationRate || (property?.investmentAnalysis?.resaleAppreciationEst ? property.investmentAnalysis.resaleAppreciationEst.split(' ')[0].replace('Compound', '').trim() : (specs?.financials?.appreciation || 'N/A'))}
               </div>
             </div>
           </div>
@@ -705,11 +671,11 @@ export default function PropertyDetails({
           <div className="grid grid-cols-2 gap-3 pt-1 text-xs">
             <div className="flex justify-between items-center bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-100">
               <span className="text-slate-500 text-[11px]">Property Tax</span>
-              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.propertyTax ? specs.financials.propertyTax.replace(' / year', ' / yr') : '₹18.5K / yr'}</span>
+              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.propertyTax ? specs.financials.propertyTax.replace(' / year', ' / yr') : 'N/A'}</span>
             </div>
             <div className="flex justify-between items-center bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-100">
               <span className="text-slate-500 text-[11px]">Stamp Duty</span>
-              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.stampDuty ? specs.financials.stampDuty.replace('Lakhs', 'L') : '8.0% (~₹30.8L)'}</span>
+              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.stampDuty ? specs.financials.stampDuty.replace('Lakhs', 'L') : 'N/A'}</span>
             </div>
           </div>
         </div>

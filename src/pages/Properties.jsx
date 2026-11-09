@@ -167,15 +167,22 @@ export default function Properties({
                 onClick={() => navigate(`/property/${prop.slug || prop._id || prop.id}`)} 
                 className="cursor-pointer"
               >
-                <div className="relative h-56 overflow-hidden bg-slate-100">
-                  <img 
-                    src={prop.images?.[0] || prop.galleryImages?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80'} 
-                    alt={prop.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
+                <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
+                  {(prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
+                    <img 
+                      src={prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
+                      alt={prop.title || 'Property'}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400">
+                      <Building2 className="w-8 h-8 stroke-[1.5] mb-1" />
+                      <span className="text-[10px] font-sans font-medium uppercase tracking-wider">No Image</span>
+                    </div>
+                  )}
                   <div className="absolute top-3 left-3">
                     <span className="bg-white/95 text-slate-900 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-slate-200/80 shadow-2xs font-sans">
-                      {prop.badge || prop.type || prop.category || 'Prime Listing'}
+                      {prop.badge || prop.type || prop.category || 'Exclusive Listing'}
                     </span>
                   </div>
                 </div>
@@ -191,9 +198,11 @@ export default function Properties({
                   >
                     {prop.title}
                   </h3>
-                  <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
-                    {prop.description || 'Verified property listing ready for on-site inspection.'}
-                  </p>
+                  {prop.description && (
+                    <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
+                      {prop.description}
+                    </p>
+                  )}
                 </div>
               </div>
 

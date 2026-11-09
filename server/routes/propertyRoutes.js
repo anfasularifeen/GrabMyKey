@@ -10,15 +10,8 @@ const INITIAL_PROPERTIES = [];
 
 // Seed initial database if empty
 export const seedInitialProperties = async () => {
-  try {
-    const count = await Property.countDocuments();
-    if (count === 0 && INITIAL_PROPERTIES.length > 0) {
-      await Property.insertMany(INITIAL_PROPERTIES);
-      console.log('🌱 Successfully seeded initial GrabMyKey luxury properties into MongoDB');
-    }
-  } catch (error) {
-    console.error('Seed error:', error.message);
-  }
+  // Mock seeding removed permanently. Database stays clean and empty until properties are published.
+  return;
 };
 
 /**
@@ -143,6 +136,83 @@ export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = [])
   property.componentsMatrix = mergedComponents;
   property.legalVerification = mergedLegal;
 
+  // Normalization & Convenience Key Matching for all frontend UI components
+  const resolvedId = property.id || (property._id ? property._id.toString() : property.slug);
+  property.id = resolvedId;
+  property._id = property._id || resolvedId;
+  property.slug = property.slug || resolvedId;
+  property.city = property.city || 'Mangaluru';
+  property.locality = property.locality || (property.location ? property.location.split(',')[0].trim() : 'Surathkal Beach');
+  property.location = property.location || `${property.locality}, ${property.city}`;
+  property.category = property.category || property.type || 'Villa';
+  property.type = property.type || property.category || 'Villa';
+
+  const rawPrice = property.priceRaw || property.pricing?.expectedPrice || 0;
+  property.priceRaw = rawPrice;
+  if (!property.pricing) {
+    property.pricing = { expectedPrice: rawPrice, isNegotiable: true, maintenanceFee: 0 };
+  }
+  if (!property.price) {
+    property.price = rawPrice >= 10000000
+      ? `₹${(rawPrice / 10000000).toFixed(2).replace(/\.00$/, '')} Cr`
+      : (rawPrice >= 100000 ? `₹${(rawPrice / 100000).toFixed(1).replace(/\.0$/, '')} Lakhs` : `₹${rawPrice.toLocaleString('en-IN')}`);
+  }
+  property.priceText = property.priceText || (property.price ? String(property.price).replace(/^₹/, '').replace(/ •.*/, '').trim() : '');
+
+  const imgs = (Array.isArray(property.images) && property.images.length > 0)
+    ? property.images
+    : ((Array.isArray(property.galleryImages) && property.galleryImages.length > 0)
+        ? property.galleryImages
+        : []);
+  property.images = imgs;
+  property.galleryImages = imgs;
+  property.thumbnail = property.thumbnail || imgs[0] || '';
+
+  if (!property.youtubeVideoId && property.videoUrl) {
+    const match = property.videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    property.youtubeVideoId = match ? match[1] : '';
+  }
+  if (!property.videoUrl && property.youtubeVideoId) {
+    property.videoUrl = `https://www.youtube.com/watch?v=${property.youtubeVideoId}`;
+  }
+
+  if (!property.specs) {
+    property.specs = {
+      bedrooms: property.bedrooms ?? property.beds ?? 0,
+      bathrooms: property.bathrooms ?? property.baths ?? 0,
+      carpetAreaSqFt: property.superArea ? parseInt(String(property.superArea).replace(/[^0-9]/g, ''), 10) || 0 : 0,
+      furnishingStatus: property.furnishing || 'Fully Furnished',
+      floorLevel: 'G',
+      totalFloors: '1'
+    };
+  }
+  property.bedrooms = property.bedrooms ?? property.specs.bedrooms ?? property.beds ?? 0;
+  property.bathrooms = property.bathrooms ?? property.specs.bathrooms ?? property.baths ?? 0;
+  property.beds = property.beds ?? property.bedrooms;
+  property.baths = property.baths ?? property.bathrooms;
+  property.superArea = property.superArea || property.area || (property.specs.carpetAreaSqFt ? `${property.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft` : '');
+  property.area = property.area || property.superArea;
+  property.furnishing = property.furnishing || property.specs.furnishingStatus || 'Furnished';
+
+  property.badge = property.badge || (property.isFeatured ? 'Featured Listing' : (property.dealType || 'Exclusive Listing'));
+
+  if (!Array.isArray(property.highlights)) {
+    property.highlights = [];
+  }
+
+  if (!Array.isArray(property.specifications) || property.specifications.length === 0) {
+    property.specifications = property.componentsMatrix.map(c => ({
+      category: c.categoryName || 'General',
+      feature: c.featureName || '',
+      status: c.isAvailable !== false ? 'Included' : 'Not Included',
+      details: c.descriptionNote || '—'
+    }));
+  }
+
+  if (!Array.isArray(property.transitMatrix)) {
+    property.transitMatrix = [];
+  }
+
   return property;
 };
 
@@ -193,6 +263,9 @@ export const getPropertyById = async (req, res) => {
       if (!property) {
         property = await Property.findOne({ slug: identifier });
       }
+      if (!property) {
+        property = await Property.findOne({ $or: [{ id: identifier }, { _id: identifier }] });
+      }
     }
 
     if (!property) {
@@ -234,16 +307,28 @@ export const getAllProperties = async (req, res) => {
   try {
     let properties = [];
 
-    if (mongoose.connection.readyState !== 1) {
-      properties = INITIAL_PROPERTIES;
-    } else {
+    if (mongoose.connection.readyState === 1) {
+      // Purge any legacy mock properties that might have been seeded into MongoDB earlier
+      await Property.deleteMany({
+        $or: [
+          { title: { $in: [
+            "The Coastal Horizon Sea Villa",
+            "Kadri Heights Commercial Suite",
+            "Bejai Royal Residency Penthouse",
+            "Ullal Sovereign Beach Plot",
+            "Sovereign Heritage Estate"
+          ] } },
+          { slug: { $in: [
+            "the-coastal-horizon-sea-villa",
+            "kadri-heights-commercial-suite",
+            "bejai-royal-residency-penthouse",
+            "ullal-sovereign-beach-plot"
+          ] } },
+          { youtubeVideoId: "dQw4w9WgXcQ" }
+        ]
+      });
+
       properties = await Property.find().sort({ createdAt: -1 });
-      
-      // Auto-seed if collection is currently empty
-      if (properties.length === 0) {
-        await seedInitialProperties();
-        properties = await Property.find().sort({ createdAt: -1 });
-      }
     }
 
     // Fetch active master presets and sync each property
@@ -254,10 +339,10 @@ export const getAllProperties = async (req, res) => {
       success: true,
       count: syncedProperties.length,
       data: syncedProperties,
-      source: mongoose.connection.readyState === 1 ? 'mongodb' : 'cache'
+      source: mongoose.connection.readyState === 1 ? 'mongodb' : 'empty'
     });
   } catch (error) {
-    console.error('Error fetching properties:', error);
+    console.error('Error fetching properties from MongoDB:', error);
     return res.status(500).json({
       success: false,
       message: 'Server error retrieving properties',
@@ -317,10 +402,10 @@ router.post('/', async (req, res) => {
         floorLevel: body.specs?.floorLevel || 'G',
         totalFloors: body.specs?.totalFloors || '1'
       },
-      youtubeVideoId: body.youtubeVideoId || (body.videoUrl ? body.videoUrl.split('v=')[1]?.substring(0, 11) : 'dQw4w9WgXcQ'),
+      youtubeVideoId: body.youtubeVideoId || (body.videoUrl?.includes('v=') ? body.videoUrl.split('v=')[1]?.substring(0, 11) : (body.videoUrl?.includes('youtu.be/') ? body.videoUrl.split('youtu.be/')[1]?.substring(0, 11) : '')),
       galleryImages: Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
         ? body.galleryImages 
-        : (Array.isArray(body.images) && body.images.length > 0 ? body.images : ["https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80"]),
+        : (Array.isArray(body.images) ? body.images : []),
       description: body.description || '',
       componentsMatrix: Array.isArray(body.componentsMatrix) ? body.componentsMatrix : [],
       legalVerification: Array.isArray(body.legalVerification) ? body.legalVerification : [],
@@ -343,17 +428,17 @@ router.post('/', async (req, res) => {
 
       // Legacy fields
       location: body.location || `${body.locality || 'Central'}, ${body.city || 'Mangaluru'}`,
-      price: body.price || '₹2.50 Cr',
-      priceRaw: Number(body.priceRaw) || body.pricing?.expectedPrice || 25000000,
+      price: body.price || '',
+      priceRaw: Number(body.priceRaw) || body.pricing?.expectedPrice || 0,
       type: body.type || body.category || 'Villa',
       beds: Number(body.beds) || body.specs?.bedrooms || 0,
       baths: Number(body.baths) || body.specs?.bathrooms || 0,
-      area: body.area || `${body.specs?.carpetAreaSqFt || 2500} sq.ft`,
-      videoUrl: body.videoUrl || `https://www.youtube.com/watch?v=${body.youtubeVideoId || 'dQw4w9WgXcQ'}`,
-      images: Array.isArray(body.images) ? body.images : body.galleryImages || [],
+      area: body.area || (body.specs?.carpetAreaSqFt ? `${body.specs.carpetAreaSqFt} sq.ft` : ''),
+      videoUrl: body.videoUrl || (body.youtubeVideoId ? `https://www.youtube.com/watch?v=${body.youtubeVideoId}` : ''),
+      images: Array.isArray(body.images) ? body.images : (Array.isArray(body.galleryImages) ? body.galleryImages : []),
       badge: body.badge || 'Verified Listing',
       legalStatus: body.legalStatus || 'Clear Title / RERA Verified',
-      highlights: Array.isArray(body.highlights) ? body.highlights : ["Advocate Audited Clear Title", "Direct Ingress", "Verified Listing"]
+      highlights: Array.isArray(body.highlights) ? body.highlights : []
     });
 
     const saved = await newProperty.save();

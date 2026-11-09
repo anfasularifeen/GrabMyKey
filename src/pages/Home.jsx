@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, ChevronDown, Play, ArrowUpRight } from 'lucide-react';
+import { Search, ChevronDown, Play, ArrowUpRight, Building2 } from 'lucide-react';
 import { useProperties } from '../context/PropertyContext';
 import PropertyCard from '../components/PropertyCard';
-import { mockProperties } from '../data/mockProperties';
 
 export default function Home({
   searchQuery: externalSearchQuery,
@@ -12,27 +11,48 @@ export default function Home({
   setSelectedRegion: externalSetSelectedRegion,
   onBrowseAll,
   property = null,
-  properties: externalProperties,
+  properties: externalProperties = [],
   showGrid = true
 } = {}) {
   const navigate = useNavigate();
-  const { properties: contextProperties } = useProperties();
-  const properties = externalProperties !== undefined ? externalProperties : contextProperties;
+  const { properties: contextProperties = [], isLoading } = useProperties();
   
+  // Wipe default initial states: strictly start empty [] and null
+  const [properties, setProperties] = useState([]);
+  const [featuredProperty, setFeaturedProperty] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [localRegion, setLocalRegion] = useState('All');
+
+  // Synchronize with external or context properties
+  useEffect(() => {
+    const list = Array.isArray(externalProperties) && externalProperties.length > 0
+      ? externalProperties
+      : (Array.isArray(contextProperties) ? contextProperties : []);
+    setProperties(list);
+  }, [externalProperties, contextProperties]);
+
+  useEffect(() => {
+    if (property) {
+      setFeaturedProperty(property);
+    } else if (properties.length > 0) {
+      setFeaturedProperty(properties[0]);
+    } else {
+      setFeaturedProperty(null);
+    }
+  }, [property, properties]);
   
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearch;
   const setSearchQuery = externalSetSearchQuery || setLocalSearch;
   const selectedRegion = externalSelectedRegion !== undefined ? externalSelectedRegion : localRegion;
   const setSelectedRegion = externalSetSelectedRegion || setLocalRegion;
 
-  // Safe Fallback Dataset
-  const activeListings = (properties && properties.length > 0) ? properties : mockProperties;
-  const featured = property || activeListings[0];
+  // Live Backend Listings (Strictly empty array if no live records)
+  const activeListings = Array.isArray(properties) ? properties : [];
+  const featured = featuredProperty;
 
   const activeVideoUrl = featured?.videoUrl || (featured?.youtubeVideoId ? `https://www.youtube.com/embed/${featured.youtubeVideoId}?autoplay=1` : null);
+  const featuredPoster = featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -145,38 +165,49 @@ export default function Home({
                       Featured Video Tour
                     </span>
                     <span className="px-3.5 py-1.5 rounded-full bg-white text-[10px] font-bold text-slate-900 uppercase tracking-widest shadow-sm">
-                      EXCLUSIVE LISTING
+                      {featured ? 'EXCLUSIVE LISTING' : 'MANGALURU, KA'}
                     </span>
                   </div>
 
                   {/* Center Play Control Button */}
-                  <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                    <div 
-                      onClick={() => {
-                        if (activeVideoUrl) setIsPlaying(true);
-                      }}
-                      className={`w-16 h-16 rounded-full bg-slate-950/80 border border-white/20 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform ${activeVideoUrl ? 'cursor-pointer pointer-events-auto' : ''}`}
-                    >
-                      <Play className="w-6 h-6 fill-white ml-0.5"/>
+                  {activeVideoUrl && (
+                    <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                      <div 
+                        onClick={() => setIsPlaying(true)}
+                        className="w-16 h-16 rounded-full bg-slate-950/80 border border-white/20 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform cursor-pointer pointer-events-auto"
+                      >
+                        <Play className="w-6 h-6 fill-white ml-0.5"/>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Video Background Cover & Dark Overlay */}
-                  <img 
-                    src={featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80"} 
-                    alt="Featured Property Walkthrough"
-                    className="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-700"
-                  />
+                  {featuredPoster ? (
+                    <img 
+                      src={featuredPoster} 
+                      alt={featured?.title || "Featured Property Walkthrough"}
+                      className="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-700"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black opacity-90" />
+                  )}
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-slate-950/40 pointer-events-none" />
 
                   {/* Bottom Sleek Floating Metadata Bar */}
                   <div className="z-10 p-4 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-white/10 flex items-center justify-between shadow-lg">
                     <div className="space-y-0.5 min-w-0 pr-3">
                       <h3 className="text-sm sm:text-base font-bold text-white font-serif truncate" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                        {featured?.title || "The Coastal Horizon Sea Villa"}
+                        {featured ? featured.title : "No Featured Video Tour"}
                       </h3>
                       <p className="text-xs text-slate-300 font-sans truncate">
-                        {featured?.location || "Surathkal Beach, Mangaluru"} <span className="text-white font-semibold ml-1">• {featured?.price || (featured?.priceText ? `₹${featured.priceText}` : "₹3.85 Cr")}</span>
+                        {featured ? (
+                          <>
+                            {featured.location || (featured.locality ? `${featured.locality}, ${featured.city || 'Mangaluru'}` : 'Mangaluru')}
+                            {featured.price ? <span className="text-white font-semibold ml-1">• {featured.price}</span> : (featured.priceText ? <span className="text-white font-semibold ml-1">• ₹{featured.priceText}</span> : '')}
+                          </>
+                        ) : (
+                          "Add listings via Admin Console to feature on-site walkthroughs"
+                        )}
                       </p>
                     </div>
 
@@ -217,11 +248,51 @@ export default function Home({
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {activeListings.slice(0, 4).map((property) => (
-              <PropertyCard key={property.id || property._id || property.slug} property={property} />
-            ))}
-          </div>
+          {isLoading && activeListings.length === 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden animate-pulse flex flex-col justify-between shadow-xs">
+                  <div className="h-56 bg-slate-100" />
+                  <div className="p-6 space-y-3">
+                    <div className="h-3 bg-slate-200 rounded w-1/3" />
+                    <div className="h-5 bg-slate-200 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-full" />
+                  </div>
+                  <div className="px-6 pb-6 pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <div className="h-5 bg-slate-200 rounded w-20" />
+                    <div className="h-4 bg-slate-100 rounded w-16" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : activeListings.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {activeListings.slice(0, 4).map((property) => (
+                <PropertyCard key={property.id || property._id || property.slug} property={property} />
+              ))}
+            </div>
+          ) : (
+            <div className="py-14 px-6 rounded-3xl bg-white border border-slate-200/80 text-center space-y-3 shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 flex items-center justify-center mx-auto text-[#C59B27]">
+                <Building2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-serif font-bold text-[#0F172A]" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                No Properties Listed Yet
+              </h3>
+              <p className="text-xs text-slate-500 font-sans max-w-md mx-auto leading-relaxed">
+                No properties listed yet. Add a listing from admin panel.
+              </p>
+              <div className="pt-2">
+                <Link
+                  to="/manage-345"
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F172A] hover:bg-[#C59B27] text-white rounded-xl text-xs font-semibold transition-colors font-sans shadow-sm"
+                >
+                  <span>Open Admin Panel</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>

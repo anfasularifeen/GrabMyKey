@@ -51,16 +51,18 @@ const legalChecklistItemSchema = new mongoose.Schema({
 
 // 4. Master Property Listing Schema
 const PropertySchema = new mongoose.Schema({
+  _id: { type: mongoose.Schema.Types.Mixed },
+  id: { type: String },
   title: { type: String, required: true, trim: true },
   slug: { type: String, required: true, unique: true, trim: true },
   city: { type: String, enum: ['Mangaluru'], default: 'Mangaluru', required: true },
   locality: { type: String, required: true, trim: true },
   category: { 
     type: String, 
-    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot'], 
+    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'], 
     required: true 
   },
-  dealType: { type: String, enum: ['Resale', 'Rental'], required: true, default: 'Resale' },
+  dealType: { type: String, enum: ['Resale', 'Rental', 'New Launch', 'Direct Sale'], required: true, default: 'Resale' },
   
   pricing: {
     expectedPrice: { type: Number, required: true },
@@ -74,7 +76,7 @@ const PropertySchema = new mongoose.Schema({
     carpetAreaSqFt: { type: Number, default: 0 },
     furnishingStatus: { 
       type: String, 
-      enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'],
+      enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished', 'Furnished'],
       default: 'Fully Furnished'
     },
     floorLevel: { type: String, default: 'G' },

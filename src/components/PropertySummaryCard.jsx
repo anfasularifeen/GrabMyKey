@@ -16,7 +16,7 @@ export default function PropertySummaryCard({ property = {} }) {
             PLOT AREA
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.plotArea || property.superArea || property.area || "12.5 Cents"}
+            {property.plotArea || property.superArea || property.area || "Not Specified"}
           </p>
         </div>
 
@@ -26,7 +26,7 @@ export default function PropertySummaryCard({ property = {} }) {
             BOUNDARY / FENCING
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.boundary || "Gated Compound"}
+            {property.boundary || "Not Specified"}
           </p>
         </div>
 
@@ -36,7 +36,7 @@ export default function PropertySummaryCard({ property = {} }) {
             ZONING TYPE
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.zoning || "Residential Conversion"}
+            {property.zoning || "Not Specified"}
           </p>
         </div>
 
@@ -46,7 +46,7 @@ export default function PropertySummaryCard({ property = {} }) {
             ROAD FRONTAGE
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.roadWidth || "30 ft Concrete Road"}
+            {property.roadWidth || "Not Specified"}
           </p>
         </div>
       </div>

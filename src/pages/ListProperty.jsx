@@ -79,9 +79,7 @@ export default function ListProperty() {
     const cleanPrice = formData.expectedPrice ? (formData.expectedPrice.startsWith('₹') ? formData.expectedPrice : `₹${formData.expectedPrice}`) : 'Price on Request';
     const cleanLocation = formData.locality ? `${formData.locality}, Mangaluru` : 'Mangaluru';
     const cleanTitle = `${formData.locality || 'Mangaluru'} ${formData.assetCategory || 'Residence'}`;
-    const cleanImages = images.length > 0 ? images.map(img => img.url) : [
-      'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80'
-    ];
+    const cleanImages = images.length > 0 ? images.map(img => img.url) : [];
 
     addProperty({
       title: cleanTitle,

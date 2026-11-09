@@ -98,10 +98,10 @@ const INITIAL_FORM_STATE = {
   furnishingStatus: 'Fully Furnished',
   floorLevel: 'G+1',
   totalFloors: '2',
-  youtubeVideoId: 'dQw4w9WgXcQ',
-  galleryImagesStr: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80\nhttps://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
-  description: 'Executive luxury estate with private landscaped grounds and panoramic coastal vistas.',
-  badge: 'Exclusive Tour',
+  youtubeVideoId: '',
+  galleryImagesStr: '',
+  description: '',
+  badge: 'Verified Listing',
   isFeatured: false,
   status: 'Active',
   advocateVerificationAvailable: true,
@@ -111,61 +111,21 @@ const INITIAL_FORM_STATE = {
 
   // Manual Strategic Transit & Infrastructure
   transitMatrix: DEFAULT_TRANSIT_MATRIX,
-  roadIngressText: '40ft Wide Asphalt Road',
-  zoningTagText: 'RERA Compliant',
+  roadIngressText: '',
+  zoningTagText: '',
 
   // Dynamic Self-Verifiable Legal Audit
   legalVerification: DEFAULT_12_POINT_LEGAL_CHECKLIST,
 
   // Investment Analysis
-  rentalYieldEst: '₹95,000 / mo (4.5% Gross Yield)',
-  resaleAppreciationEst: '11.0% - 13.5% Compound Y-o-Y',
-  localityGrowthDriver: 'High-growth residential belt with premium social infrastructure'
+  rentalYieldEst: '',
+  resaleAppreciationEst: '',
+  localityGrowthDriver: ''
 };
 
 const SAMPLE_PROPERTIES = [];
 
-const SAMPLE_INBOUND_LEADS = [
-  {
-    _id: "671e901",
-    id: "901",
-    ticketId: "TKT-901",
-    ownerName: "Muhammed Rashid",
-    phone: "+91 98470 12345",
-    location: "Bejai, Mangaluru",
-    assetType: "Apartment",
-    expectedPrice: "₹1.10 Cr",
-    details: "3BHK luxury apartment ready for title inspection and walkthrough verification.",
-    status: "New Inquiry",
-    createdAt: "2026-03-24T10:00:00.000Z"
-  },
-  {
-    _id: "671e902",
-    id: "902",
-    ticketId: "TKT-902",
-    ownerName: "Capt. Arvind Hegde",
-    phone: "+91 94481 67890",
-    location: "Kadri Hills, Mangaluru",
-    assetType: "Villa",
-    expectedPrice: "₹3.40 Cr",
-    details: "Colonial style 4BHK independent bungalow with private orchard and clear 40-year parent deed.",
-    status: "Contacted",
-    createdAt: "2026-03-23T14:30:00.000Z"
-  },
-  {
-    _id: "671e903",
-    id: "903",
-    ticketId: "TKT-903",
-    ownerName: "Dr. Ronald Pinto",
-    phone: "+91 98200 54321",
-    location: "Surathkal Beach Road",
-    assetType: "Plot",
-    expectedPrice: "₹85 Lakhs",
-    details: "Coastal residential development plot with CRZ-II clearance certificate and compound wall.",
-    status: "Archived / Resolved",
-    createdAt: "2026-03-22T09:15:00.000Z"
-  }
-];
+const SAMPLE_INBOUND_LEADS = [];
 
 export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated }) {
   const navigate = useNavigate();
@@ -178,20 +138,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const activeTab = isPublishRoute ? 'publish-listing' : (isMasterPresetsRoute ? 'master-presets' : internalTab);
 
   // Data states
-  const [properties, setProperties] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('grabmykey_properties');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) return parsed;
-        }
-      } catch (e) {
-        console.warn('Failed to load cached properties', e);
-      }
-    }
-    return SAMPLE_PROPERTIES;
-  });
+  const [properties, setProperties] = useState([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -202,7 +149,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       }
     }
   }, [properties]);
-  const [leads, setLeads] = useState(SAMPLE_INBOUND_LEADS);
+  const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
@@ -231,10 +178,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const [formStep, setFormStep] = useState(1);
   const [editingPropertyId, setEditingPropertyId] = useState(null);
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
-  const [uploadedFiles, setUploadedFiles] = useState([
-    { name: 'Deed_Verification_Chain.pdf', size: '4.2 MB', type: 'document' },
-    { name: 'Villa_Terrace_SeaView.jpg', size: '2.8 MB', type: 'image' }
-  ]);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
 
   // Hero Featured Video & Settings state
@@ -388,13 +332,17 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       await checkServerHealth();
 
       const propRes = await fetchProperties();
-      if (propRes?.success && Array.isArray(propRes.data) && propRes.data.length > 0) {
+      if (propRes?.success && Array.isArray(propRes.data)) {
         setProperties(propRes.data);
+      } else {
+        setProperties([]);
       }
 
       const leadRes = await fetchLeads();
-      if (leadRes?.success && Array.isArray(leadRes.data) && leadRes.data.length > 0) {
+      if (leadRes?.success && Array.isArray(leadRes.data)) {
         setLeads(leadRes.data);
+      } else {
+        setLeads([]);
       }
 
       try {
@@ -521,7 +469,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       furnishingStatus: prop.specs?.furnishingStatus || 'Fully Furnished',
       floorLevel: prop.specs?.floorLevel || 'G',
       totalFloors: prop.specs?.totalFloors || '1',
-      youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : 'dQw4w9WgXcQ'),
+      youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : ''),
       galleryImagesStr: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
         ? prop.galleryImages.join('\n')
         : (Array.isArray(prop.images) ? prop.images.join('\n') : ''),
@@ -641,7 +589,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return (match && match[2].length === 11) ? match[2] : raw;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.youtubeVideoId || "dQw4w9WgXcQ";
+    return prop?.youtubeVideoId || "";
   }, [heroSettings.heroCustomYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   const previewThumbnail = useMemo(() => {
@@ -649,7 +597,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return `https://img.youtube.com/vi/${previewYoutubeId}/maxresdefault.jpg`;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.images?.[0] || 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80';
+    return prop?.images?.[0] || '';
   }, [previewYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   // Dynamic Car-Style Feature Matrix Handlers
@@ -857,7 +805,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     const isLand = formData.category === 'Land/Plot';
     const parsedImages = formData.galleryImagesStr
       ? formData.galleryImagesStr.split('\n').map(s => s.trim()).filter(Boolean)
-      : ["https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80"];
+      : [];
 
     const priceNum = Number(formData.expectedPrice) || 25000000;
     const formatDisplayPrice = (val) => {
@@ -894,7 +842,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         floorLevel: formData.floorLevel || 'G',
         totalFloors: formData.totalFloors || '1'
       },
-      youtubeVideoId: formData.youtubeVideoId?.trim() || 'dQw4w9WgXcQ',
+      youtubeVideoId: formData.youtubeVideoId?.trim() || '',
       galleryImages: parsedImages,
       description: formData.description,
       componentsMatrix: formData.componentsMatrix || [],
@@ -1341,12 +1289,16 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                               {/* Asset Info & Thumbnail */}
                               <td className="py-4 px-6">
                                 <div className="flex items-center space-x-3">
-                                  <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs">
-                                    <img
-                                      src={prop.images?.[0] || 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=400&q=80'}
-                                      alt={prop.title}
-                                      className="w-full h-full object-cover"
-                                    />
+                                  <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs flex items-center justify-center">
+                                    {prop.images?.[0] ? (
+                                      <img
+                                        src={prop.images[0]}
+                                        alt={prop.title}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <Building2 className="w-4 h-4 text-slate-400" />
+                                    )}
                                   </div>
                                   <div className="min-w-0">
                                     <span className="font-bold text-[#0a1d37] text-xs block truncate max-w-xs">{prop.title}</span>
@@ -1891,7 +1843,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                             <input
                               required
                               type="text"
-                              placeholder="e.g. dQw4w9WgXcQ or https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                              placeholder="e.g. 7X8mLSQkg4Y or https://www.youtube.com/watch?v=..."
                               value={formData.youtubeVideoId}
                               onChange={e => {
                                 const val = e.target.value;
@@ -1913,27 +1865,29 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                           {showYoutubePicker && (
                             <div className="mt-3 p-4 bg-[#f8f6f0] border border-slate-200 rounded-2xl space-y-3">
                               <span className="text-xs font-mono font-bold text-[#0a1d37] uppercase tracking-wider block">
-                                Preset On-Site Walkthrough Tours:
+                                Existing Property Walkthrough Tours:
                               </span>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {[
-                                  { title: 'Featured Walkthrough Tour 1', id: 'dQw4w9WgXcQ' },
-                                  { title: 'Commercial Suite Walkthrough', id: 'dQw4w9WgXcQ' },
-                                  { title: 'Coastal Plantation Walkthrough', id: 'dQw4w9WgXcQ' }
-                                ].map((v, i) => (
-                                  <div
-                                    key={i}
-                                    onClick={() => {
-                                      setFormData({ ...formData, youtubeVideoId: v.id });
-                                      setShowYoutubePicker(false);
-                                    }}
-                                    className="p-3 bg-white hover:bg-amber-50/60 border border-slate-300 rounded-xl cursor-pointer text-xs transition-colors"
-                                  >
-                                    <p className="font-bold text-[#0a1d37]">{v.title}</p>
-                                    <span className="text-[10px] text-[#b8860b] font-semibold mt-1 block">Click to Apply</span>
-                                  </div>
-                                ))}
-                              </div>
+                              {properties.filter(p => p.youtubeVideoId).length > 0 ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  {properties.filter(p => p.youtubeVideoId).slice(0, 6).map((p, i) => (
+                                    <div
+                                      key={p._id || p.id || i}
+                                      onClick={() => {
+                                        setFormData({ ...formData, youtubeVideoId: p.youtubeVideoId });
+                                        setShowYoutubePicker(false);
+                                      }}
+                                      className="p-3 bg-white hover:bg-amber-50/60 border border-slate-300 rounded-xl cursor-pointer text-xs transition-colors"
+                                    >
+                                      <p className="font-bold text-[#0a1d37] truncate">{p.title}</p>
+                                      <span className="text-[10px] text-[#b8860b] font-semibold mt-1 block">Click to Apply ({p.youtubeVideoId})</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-500 py-1">
+                                  No previous video tours found. Enter a custom YouTube video ID or URL in the input above.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -1947,7 +1901,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                             rows={4}
                             value={formData.galleryImagesStr}
                             onChange={e => setFormData({ ...formData, galleryImagesStr: e.target.value })}
-                            placeholder="https://images.unsplash.com/..."
+                            placeholder="https://example.com/property-photo.jpg (one URL per line)"
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#0a1d37] font-mono focus:border-[#b8860b] focus:outline-none"
                           />
                         </div>
@@ -2691,7 +2645,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                         <Video className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
                           type="text"
-                          placeholder="e.g. dQw4w9WgXcQ or https://www.youtube.com/watch?v=..."
+                          placeholder="e.g. 7X8mLSQkg4Y or https://www.youtube.com/watch?v=..."
                           value={heroSettings.heroCustomYoutubeId || ''}
                           onChange={(e) => setHeroSettings({ ...heroSettings, heroCustomYoutubeId: e.target.value })}
                           className="w-full bg-[#f8f6f0] border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-xs text-[#0a1d37] font-medium focus:outline-none focus:border-[#b8860b]"

@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Maximize2, Building2 } from 'lucide-react';
 
 export default function PropertyImageGallery({ 
   images = [], 
@@ -15,14 +15,8 @@ export default function PropertyImageGallery({
   const [zoomPos, setZoomPos] = useState({ x: 0, y: 0, percentageX: 0, percentageY: 0 });
   const imageRef = useRef(null);
 
-  const defaultImages = [
-    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80",
-    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80",
-    "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80"
-  ];
-
-  const galleryImages = images && images.length > 0 ? images : defaultImages;
-  const currentImage = galleryImages[selectedImage] || galleryImages[0];
+  const galleryImages = Array.isArray(images) && images.length > 0 ? images : [];
+  const currentImage = galleryImages[selectedImage] || galleryImages[0] || '';
 
   const handleMouseMove = (e) => {
     if (!imageRef.current) return;
@@ -56,6 +50,20 @@ export default function PropertyImageGallery({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isModalOpen, galleryImages.length]);
+
+  if (galleryImages.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-2xl font-bold text-[#0F172A] font-serif" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+          Photos
+        </h3>
+        <div className="relative h-[320px] rounded-2xl bg-slate-100 border border-slate-200/80 flex flex-col items-center justify-center text-slate-400">
+          <Building2 className="w-10 h-10 mb-2 stroke-[1.5]" />
+          <span className="text-xs font-sans font-medium uppercase tracking-wider">No Gallery Images Uploaded</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">

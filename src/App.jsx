@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { 
   fetchProperties, 
+  fetchPropertyById,
   fetchLeads, 
   submitLead, 
   checkServerHealth,
@@ -187,33 +188,24 @@ export default function App() {
     };
   });
 
-  // Inbound seller requests
-  const [sellerRequests, setSellerRequests] = useState(() => [
-    {
-      id: "901",
-      ticketId: "TKT-901",
-      ownerName: "Muhammed Rashid",
-      phone: "+91 98470 12345",
-      location: "Bejai, Mangaluru",
-      assetType: "Apartment",
-      expectedPrice: "₹1.10 Cr",
-      details: "3BHK luxury apartment ready for title inspection and walkthrough verification.",
-      status: "Pending Inspection",
-      createdAt: "2026-03-24T10:00:00.000Z"
-    }
-  ]);
+  // Inbound seller requests (initialized to empty array)
+  const [sellerRequests, setSellerRequests] = useState([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
       const propRes = await fetchProperties();
-      if (propRes?.success && Array.isArray(propRes.data) && propRes.data.length > 0) {
+      if (propRes?.success && Array.isArray(propRes.data)) {
         setProperties(propRes.data);
+      } else {
+        setProperties([]);
       }
 
       const leadRes = await fetchLeads();
-      if (leadRes?.success && Array.isArray(leadRes.data) && leadRes.data.length > 0) {
+      if (leadRes?.success && Array.isArray(leadRes.data)) {
         setSellerRequests(leadRes.data);
+      } else {
+        setSellerRequests([]);
       }
 
       const settingsRes = await fetchSiteSettings();
@@ -236,8 +228,29 @@ export default function App() {
     if (propertyIdFromUrl) {
       setSelectedPropertyId(propertyIdFromUrl);
       setActiveGalleryIdx(0);
+
+      const target = String(propertyIdFromUrl).toLowerCase();
+      const exists = Array.isArray(properties) && properties.some(p => 
+        String(p?.id || '').toLowerCase() === target || 
+        String(p?._id || '').toLowerCase() === target || 
+        String(p?.slug || '').toLowerCase() === target
+      );
+
+      if (!exists) {
+        fetchPropertyById(propertyIdFromUrl).then(res => {
+          if (res?.data) {
+            setProperties(prev => {
+              const currentList = Array.isArray(prev) ? prev : [];
+              if (currentList.some(p => String(p.id) === String(res.data.id) || p.slug === res.data.slug)) {
+                return currentList;
+              }
+              return [res.data, ...currentList];
+            });
+          }
+        }).catch(() => {});
+      }
     }
-  }, [propertyIdFromUrl]);
+  }, [propertyIdFromUrl, properties, setProperties]);
 
   // Check admin auth state when visiting admin routes
   useEffect(() => {
@@ -334,9 +347,7 @@ export default function App() {
 
   // Always ensure images is an array to prevent "Cannot read properties of undefined (reading 'images')"
   const featuredImages = featuredProperty?.images || featuredProperty?.galleryImages || [];
-  const primaryHeroImage = featuredImages.length > 0 
-    ? featuredImages[0] 
-    : "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80";
+  const primaryHeroImage = featuredImages.length > 0 ? featuredImages[0] : "";
 
   // Selected Property Object (matches by slug, id, or _id)
   const selectedProperty = useMemo(() => {
@@ -432,7 +443,7 @@ export default function App() {
     if (heroYoutubeId) {
       return `https://img.youtube.com/vi/${heroYoutubeId}/maxresdefault.jpg`;
     }
-    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80";
+    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
   }, [heroYoutubeId, heroFeaturedProperty]);
 
   const heroTitle = heroSettings?.heroOverlayTitle || heroFeaturedProperty?.title || "";

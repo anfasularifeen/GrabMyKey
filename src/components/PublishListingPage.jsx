@@ -45,47 +45,10 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   // Step 2: Media & Links state
   const [videoUrl, setVideoUrl] = useState('');
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
-  const [channelVideos] = useState([
-    {
-      id: 'vid-1',
-      title: 'Prime Villa Walkthrough Tour',
-      duration: '4:20',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=400&q=80',
-      views: '12.4K views'
-    },
-    {
-      id: 'vid-2',
-      title: 'Commercial Corporate Suite Tour',
-      duration: '3:45',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80',
-      views: '8.9K views'
-    },
-    {
-      id: 'vid-3',
-      title: 'Scenic Plantation Tour',
-      duration: '5:12',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=400&q=80',
-      views: '15.1K views'
-    },
-    {
-      id: 'vid-4',
-      title: 'Luxury Penthouse Tour',
-      duration: '4:05',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=400&q=80',
-      views: '10.2K views'
-    }
-  ]);
+  const [channelVideos] = useState([]);
 
   // Step 2 & Document File Uploads State
-  const [uploadedFiles, setUploadedFiles] = useState([
-    { name: 'Villa_SeaView_Terrace.jpg', size: '3.4 MB', type: 'image' },
-    { name: 'Architectural_Master_Plan.pdf', size: '8.1 MB', type: 'document' },
-    { name: 'MotherDeed_Chain_Audit.pdf', size: '12.5 MB', type: 'document' }
-  ]);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
 
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -102,14 +65,8 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
-  // Step 3: Dynamic Structural & Land Inventory State as requested:
-  // const [inventory, setInventory] = useState([{ label: 'Living Halls & Lounge', value: '2 (Formal Living + Lounge)' }]);
-  const [inventory, setInventory] = useState([
-    { label: 'Living Halls & Lounge', value: '2 (Formal Living + Lounge)' },
-    { label: 'Power Backup', value: '15KW 3-Phase + 100% Generator Backup' },
-    { label: 'Water Source', value: 'Open Well + City Corporation Supply' },
-    { label: 'Approach Road Width', value: '40ft Tar Road with Municipal Lighting' }
-  ]);
+  // Step 3: Dynamic Structural & Land Inventory State
+  const [inventory, setInventory] = useState([]);
 
   const handleAddCustomInventory = () => {
     // Provide an explicit "+ Add Custom Inventory Parameter" button: clicking it appends a new row { label: '', value: '' }
@@ -508,31 +465,37 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                              {channelVideos.map(vid => (
-                                <div
-                                  key={vid.id}
-                                  onClick={() => {
-                                    setVideoUrl(vid.url);
-                                    setShowYoutubePicker(false);
-                                  }}
-                                  className="group bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-[#C59B27] hover:shadow-md cursor-pointer transition-all"
-                                >
-                                  <div className="h-24 relative overflow-hidden bg-slate-900">
-                                    <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                                    <span className="absolute bottom-1 right-1 bg-black/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded">
-                                      {vid.duration}
-                                    </span>
+                            {channelVideos.length === 0 ? (
+                              <p className="text-xs text-slate-500 py-3 text-center">
+                                No pre-loaded channel walkthroughs. Paste a direct YouTube link above.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                                {channelVideos.map(vid => (
+                                  <div
+                                    key={vid.id}
+                                    onClick={() => {
+                                      setVideoUrl(vid.url);
+                                      setShowYoutubePicker(false);
+                                    }}
+                                    className="group bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-[#C59B27] hover:shadow-md cursor-pointer transition-all"
+                                  >
+                                    <div className="h-24 relative overflow-hidden bg-slate-900">
+                                      <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      <span className="absolute bottom-1 right-1 bg-black/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded">
+                                        {vid.duration}
+                                      </span>
+                                    </div>
+                                    <div className="p-2.5">
+                                      <p className="text-[11px] font-semibold text-[#0F1E36] group-hover:text-[#C59B27] line-clamp-1">
+                                        {vid.title}
+                                      </p>
+                                      <span className="text-[10px] text-slate-400 block mt-0.5">Click to Select</span>
+                                    </div>
                                   </div>
-                                  <div className="p-2.5">
-                                    <p className="text-[11px] font-semibold text-[#0F1E36] group-hover:text-[#C59B27] line-clamp-1">
-                                      {vid.title}
-                                    </p>
-                                    <span className="text-[10px] text-slate-400 block mt-0.5">Click to Select</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>

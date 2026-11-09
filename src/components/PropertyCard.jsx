@@ -1,19 +1,19 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin } from 'lucide-react';
+import { MapPin, Building2 } from 'lucide-react';
 
 export default function PropertyCard({ property }) {
   if (!property) return null;
 
-  const propId = property.id || property._id || property.slug || '1';
+  const propId = property.id || property._id || property.slug || '';
   const propSlug = property.slug || propId;
-  const propTitle = property.title || 'Prime Property';
+  const propTitle = property.title || 'Untitled Property';
   const propLocation = property.location || property.locality || 'Mangaluru';
-  const propBadge = property.badge || property.category || property.type || 'Prime Listing';
-  const propDescription = property.description || 'Verified luxury property ready for on-site inspection and video walkthrough.';
+  const propBadge = property.badge || property.category || property.type || 'Exclusive Listing';
+  const propDescription = property.description || '';
 
-  // Image handling with safe fallbacks
-  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80";
+  // Image handling from live backend records (zero static fallbacks)
+  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
 
   // Price formatting
   const propPrice = property.price || (
@@ -27,12 +27,19 @@ export default function PropertyCard({ property }) {
   return (
     <div className="bg-white border border-slate-200/80 hover:border-[#C59B27]/40 rounded-2xl overflow-hidden transition-all duration-200 group flex flex-col justify-between shadow-xs hover:shadow-xl">
       <Link to={`/property/${propSlug}`} className="block">
-        <div className="relative h-56 overflow-hidden bg-slate-100">
-          <img 
-            src={propImage} 
-            alt={propTitle}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
+        <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
+          {propImage ? (
+            <img 
+              src={propImage} 
+              alt={propTitle}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400">
+              <Building2 className="w-8 h-8 stroke-[1.5] mb-1" />
+              <span className="text-[10px] font-sans font-medium uppercase tracking-wider">No Image Available</span>
+            </div>
+          )}
           <div className="absolute top-3 left-3">
             <span className="bg-white/95 text-[#0a1d37] font-semibold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border border-[#0a1d37]/20 shadow-xs font-sans">
               {propBadge}
@@ -51,9 +58,11 @@ export default function PropertyCard({ property }) {
           >
             {propTitle}
           </h3>
-          <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
-            {propDescription}
-          </p>
+          {propDescription && (
+            <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
+              {propDescription}
+            </p>
+          )}
         </div>
       </Link>
 

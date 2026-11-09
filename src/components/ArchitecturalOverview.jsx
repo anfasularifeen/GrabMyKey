@@ -1,14 +1,7 @@
 import React from 'react';
 
 export default function ArchitecturalOverview({ description, highlights }) {
-  const defaultHighlights = [
-    "Verified Physical On-Site Inspection",
-    "Clear Title & Encumbrance Verified",
-    "Independent Access Road Frontage",
-    "High-Growth Residential & Commercial Corridor"
-  ];
-
-  const highlightList = highlights && highlights.length > 0 ? highlights : defaultHighlights;
+  const highlightList = Array.isArray(highlights) ? highlights : [];
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 md:p-8 space-y-6">
@@ -25,30 +18,37 @@ export default function ArchitecturalOverview({ description, highlights }) {
           Architectural Overview
         </h2>
 
-        <p className="text-sm md:text-base text-slate-600 leading-relaxed font-sans max-w-4xl">
-          {description || "Verified property listing with on-site physical inspection and authenticated documentation across Mangaluru."}
-        </p>
+        {description && (
+          <p className="text-sm md:text-base text-slate-600 leading-relaxed font-sans max-w-4xl">
+            {description}
+          </p>
+        )}
       </div>
 
-      <div className="h-px bg-slate-100 w-full" />
+      {highlightList.length > 0 && (
+        <>
+          <div className="h-px bg-slate-100 w-full" />
 
-      {/* Clean 4-Card Highlight Grid (No Sparkle Icons) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-        {highlightList.map((item, idx) => {
-          const labelText = typeof item === 'string' ? item : item.label;
+          {/* Clean Highlight Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+            {highlightList.map((item, idx) => {
+              const labelText = typeof item === 'string' ? item : item?.label || '';
+              if (!labelText) return null;
 
-          return (
-            <div 
-              key={idx}
-              className="flex items-center justify-center text-center px-4 py-3.5 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 text-slate-800 shadow-2xs hover:border-[#C59B27] hover:bg-white transition-all cursor-default"
-            >
-              <span className="text-xs font-semibold font-sans leading-tight">
-                {labelText}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+              return (
+                <div 
+                  key={idx}
+                  className="flex items-center justify-center text-center px-4 py-3.5 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 text-slate-800 shadow-2xs hover:border-[#C59B27] hover:bg-white transition-all cursor-default"
+                >
+                  <span className="text-xs font-semibold font-sans leading-tight">
+                    {labelText}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

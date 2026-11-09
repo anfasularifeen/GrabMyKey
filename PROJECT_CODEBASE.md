@@ -1,5 +1,5 @@
 # GrabMyKey Complete Codebase Export
-> Generated on: 11/9/2026, 7:47:10 PM
+> Generated on: 11/10/2026, 12:50:52 AM
 
 ---
 
@@ -822,16 +822,18 @@ const legalChecklistItemSchema = new mongoose.Schema({
 
 // 4. Master Property Listing Schema
 const PropertySchema = new mongoose.Schema({
+  _id: { type: mongoose.Schema.Types.Mixed },
+  id: { type: String },
   title: { type: String, required: true, trim: true },
   slug: { type: String, required: true, unique: true, trim: true },
   city: { type: String, enum: ['Mangaluru'], default: 'Mangaluru', required: true },
   locality: { type: String, required: true, trim: true },
   category: { 
     type: String, 
-    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot'], 
+    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'], 
     required: true 
   },
-  dealType: { type: String, enum: ['Resale', 'Rental'], required: true, default: 'Resale' },
+  dealType: { type: String, enum: ['Resale', 'Rental', 'New Launch', 'Direct Sale'], required: true, default: 'Resale' },
   
   pricing: {
     expectedPrice: { type: Number, required: true },
@@ -845,7 +847,7 @@ const PropertySchema = new mongoose.Schema({
     carpetAreaSqFt: { type: Number, default: 0 },
     furnishingStatus: { 
       type: String, 
-      enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished'],
+      enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished', 'Furnished'],
       default: 'Fully Furnished'
     },
     floorLevel: { type: String, default: 'G' },
@@ -1069,44 +1071,7 @@ import Lead from '../models/Lead.js';
 
 const router = express.Router();
 
-const memoryLeads = [
-  {
-    _id: "671e901",
-    id: "901",
-    ticketId: "TKT-901",
-    ownerName: "Muhammed Rashid",
-    phone: "+91 98470 12345",
-    location: "Bejai, Mangaluru",
-    assetType: "Apartment",
-    expectedPrice: "₹1.10 Cr",
-    details: "3BHK luxury apartment ready for title audit and walkthrough inspection.",
-    status: "New Inquiry"
-  },
-  {
-    _id: "671e902",
-    id: "902",
-    ticketId: "TKT-902",
-    ownerName: "Capt. Arvind Hegde",
-    phone: "+91 94481 67890",
-    location: "Kadri Hills, Mangaluru",
-    assetType: "Villa",
-    expectedPrice: "₹3.40 Cr",
-    details: "Colonial style 4BHK independent bungalow with private orchard and clear 40-year deed.",
-    status: "Contacted"
-  },
-  {
-    _id: "671e903",
-    id: "903",
-    ticketId: "TKT-903",
-    ownerName: "Dr. Ronald Pinto",
-    phone: "+91 98200 54321",
-    location: "Surathkal Beach Road",
-    assetType: "Plot",
-    expectedPrice: "₹85 Lakhs",
-    details: "Coastal residential plot with CRZ-II clearance certificate and compound wall.",
-    status: "Archived / Resolved"
-  }
-];
+let memoryLeads = [];
 
 // GET /api/leads - Fetch all seller requests (Admin only)
 router.get('/', async (req, res) => {
@@ -1116,18 +1081,11 @@ router.get('/', async (req, res) => {
         success: true,
         count: memoryLeads.length,
         data: memoryLeads,
-        source: 'cache'
+        source: 'memory'
       });
     }
 
     let leads = await Lead.find().sort({ createdAt: -1 });
-
-    // Seed sample request if empty
-    if (leads.length === 0) {
-      const sample = new Lead(memoryLeads[0]);
-      await sample.save();
-      leads = [sample];
-    }
 
     res.json({
       success: true,
@@ -1154,6 +1112,28 @@ router.post('/', async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Owner name, phone number, and location are required'
+      });
+    }
+
+    if (mongoose.connection.readyState !== 1) {
+      const memoryLead = {
+        _id: new mongoose.Types.ObjectId().toString(),
+        id: String(Date.now()),
+        ticketId: `TKT-${Math.floor(100 + Math.random() * 900)}`,
+        ownerName,
+        phone,
+        location,
+        assetType: assetType || 'Villa',
+        expectedPrice: expectedPrice || 'Price on Request',
+        details: details || '',
+        status: 'Pending Inspection',
+        createdAt: new Date().toISOString()
+      };
+      memoryLeads.unshift(memoryLead);
+      return res.status(201).json({
+        success: true,
+        message: 'Property onboarding request submitted successfully',
+        data: memoryLead
       });
     }
 
@@ -1188,6 +1168,23 @@ router.post('/', async (req, res) => {
 router.patch('/:id', async (req, res) => {
   try {
     const { status } = req.body;
+
+    if (mongoose.connection.readyState !== 1) {
+      const idx = memoryLeads.findIndex(l => String(l._id) === String(req.params.id) || String(l.id) === String(req.params.id));
+      if (idx !== -1) {
+        memoryLeads[idx].status = status;
+        return res.json({
+          success: true,
+          message: 'Lead status updated',
+          data: memoryLeads[idx]
+        });
+      }
+      return res.status(404).json({
+        success: false,
+        message: 'Lead ticket not found in memory'
+      });
+    }
+
     const updated = await Lead.findByIdAndUpdate(
       req.params.id, 
       { status }, 
@@ -1218,6 +1215,15 @@ router.patch('/:id', async (req, res) => {
 // DELETE /api/leads/:id - Delete lead (Admin only)
 router.delete('/:id', async (req, res) => {
   try {
+    if (mongoose.connection.readyState !== 1) {
+      memoryLeads = memoryLeads.filter(l => String(l._id) !== String(req.params.id) && String(l.id) !== String(req.params.id));
+      return res.json({
+        success: true,
+        message: 'Lead removed successfully',
+        data: { id: req.params.id }
+      });
+    }
+
     const deleted = await Lead.findByIdAndDelete(req.params.id);
     if (!deleted) {
       return res.status(404).json({
@@ -1963,15 +1969,8 @@ const INITIAL_PROPERTIES = [];
 
 // Seed initial database if empty
 export const seedInitialProperties = async () => {
-  try {
-    const count = await Property.countDocuments();
-    if (count === 0 && INITIAL_PROPERTIES.length > 0) {
-      await Property.insertMany(INITIAL_PROPERTIES);
-      console.log('🌱 Successfully seeded initial GrabMyKey luxury properties into MongoDB');
-    }
-  } catch (error) {
-    console.error('Seed error:', error.message);
-  }
+  // Mock seeding removed permanently. Database stays clean and empty until properties are published.
+  return;
 };
 
 /**
@@ -2096,6 +2095,83 @@ export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = [])
   property.componentsMatrix = mergedComponents;
   property.legalVerification = mergedLegal;
 
+  // Normalization & Convenience Key Matching for all frontend UI components
+  const resolvedId = property.id || (property._id ? property._id.toString() : property.slug);
+  property.id = resolvedId;
+  property._id = property._id || resolvedId;
+  property.slug = property.slug || resolvedId;
+  property.city = property.city || 'Mangaluru';
+  property.locality = property.locality || (property.location ? property.location.split(',')[0].trim() : 'Surathkal Beach');
+  property.location = property.location || `${property.locality}, ${property.city}`;
+  property.category = property.category || property.type || 'Villa';
+  property.type = property.type || property.category || 'Villa';
+
+  const rawPrice = property.priceRaw || property.pricing?.expectedPrice || 0;
+  property.priceRaw = rawPrice;
+  if (!property.pricing) {
+    property.pricing = { expectedPrice: rawPrice, isNegotiable: true, maintenanceFee: 0 };
+  }
+  if (!property.price) {
+    property.price = rawPrice >= 10000000
+      ? `₹${(rawPrice / 10000000).toFixed(2).replace(/\.00$/, '')} Cr`
+      : (rawPrice >= 100000 ? `₹${(rawPrice / 100000).toFixed(1).replace(/\.0$/, '')} Lakhs` : `₹${rawPrice.toLocaleString('en-IN')}`);
+  }
+  property.priceText = property.priceText || (property.price ? String(property.price).replace(/^₹/, '').replace(/ •.*/, '').trim() : '');
+
+  const imgs = (Array.isArray(property.images) && property.images.length > 0)
+    ? property.images
+    : ((Array.isArray(property.galleryImages) && property.galleryImages.length > 0)
+        ? property.galleryImages
+        : []);
+  property.images = imgs;
+  property.galleryImages = imgs;
+  property.thumbnail = property.thumbnail || imgs[0] || '';
+
+  if (!property.youtubeVideoId && property.videoUrl) {
+    const match = property.videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    property.youtubeVideoId = match ? match[1] : '';
+  }
+  if (!property.videoUrl && property.youtubeVideoId) {
+    property.videoUrl = `https://www.youtube.com/watch?v=${property.youtubeVideoId}`;
+  }
+
+  if (!property.specs) {
+    property.specs = {
+      bedrooms: property.bedrooms ?? property.beds ?? 0,
+      bathrooms: property.bathrooms ?? property.baths ?? 0,
+      carpetAreaSqFt: property.superArea ? parseInt(String(property.superArea).replace(/[^0-9]/g, ''), 10) || 0 : 0,
+      furnishingStatus: property.furnishing || 'Fully Furnished',
+      floorLevel: 'G',
+      totalFloors: '1'
+    };
+  }
+  property.bedrooms = property.bedrooms ?? property.specs.bedrooms ?? property.beds ?? 0;
+  property.bathrooms = property.bathrooms ?? property.specs.bathrooms ?? property.baths ?? 0;
+  property.beds = property.beds ?? property.bedrooms;
+  property.baths = property.baths ?? property.bathrooms;
+  property.superArea = property.superArea || property.area || (property.specs.carpetAreaSqFt ? `${property.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft` : '');
+  property.area = property.area || property.superArea;
+  property.furnishing = property.furnishing || property.specs.furnishingStatus || 'Furnished';
+
+  property.badge = property.badge || (property.isFeatured ? 'Featured Listing' : (property.dealType || 'Exclusive Listing'));
+
+  if (!Array.isArray(property.highlights)) {
+    property.highlights = [];
+  }
+
+  if (!Array.isArray(property.specifications) || property.specifications.length === 0) {
+    property.specifications = property.componentsMatrix.map(c => ({
+      category: c.categoryName || 'General',
+      feature: c.featureName || '',
+      status: c.isAvailable !== false ? 'Included' : 'Not Included',
+      details: c.descriptionNote || '—'
+    }));
+  }
+
+  if (!Array.isArray(property.transitMatrix)) {
+    property.transitMatrix = [];
+  }
+
   return property;
 };
 
@@ -2146,6 +2222,9 @@ export const getPropertyById = async (req, res) => {
       if (!property) {
         property = await Property.findOne({ slug: identifier });
       }
+      if (!property) {
+        property = await Property.findOne({ $or: [{ id: identifier }, { _id: identifier }] });
+      }
     }
 
     if (!property) {
@@ -2187,16 +2266,28 @@ export const getAllProperties = async (req, res) => {
   try {
     let properties = [];
 
-    if (mongoose.connection.readyState !== 1) {
-      properties = INITIAL_PROPERTIES;
-    } else {
+    if (mongoose.connection.readyState === 1) {
+      // Purge any legacy mock properties that might have been seeded into MongoDB earlier
+      await Property.deleteMany({
+        $or: [
+          { title: { $in: [
+            "The Coastal Horizon Sea Villa",
+            "Kadri Heights Commercial Suite",
+            "Bejai Royal Residency Penthouse",
+            "Ullal Sovereign Beach Plot",
+            "Sovereign Heritage Estate"
+          ] } },
+          { slug: { $in: [
+            "the-coastal-horizon-sea-villa",
+            "kadri-heights-commercial-suite",
+            "bejai-royal-residency-penthouse",
+            "ullal-sovereign-beach-plot"
+          ] } },
+          { youtubeVideoId: "dQw4w9WgXcQ" }
+        ]
+      });
+
       properties = await Property.find().sort({ createdAt: -1 });
-      
-      // Auto-seed if collection is currently empty
-      if (properties.length === 0) {
-        await seedInitialProperties();
-        properties = await Property.find().sort({ createdAt: -1 });
-      }
     }
 
     // Fetch active master presets and sync each property
@@ -2207,10 +2298,10 @@ export const getAllProperties = async (req, res) => {
       success: true,
       count: syncedProperties.length,
       data: syncedProperties,
-      source: mongoose.connection.readyState === 1 ? 'mongodb' : 'cache'
+      source: mongoose.connection.readyState === 1 ? 'mongodb' : 'empty'
     });
   } catch (error) {
-    console.error('Error fetching properties:', error);
+    console.error('Error fetching properties from MongoDB:', error);
     return res.status(500).json({
       success: false,
       message: 'Server error retrieving properties',
@@ -2270,10 +2361,10 @@ router.post('/', async (req, res) => {
         floorLevel: body.specs?.floorLevel || 'G',
         totalFloors: body.specs?.totalFloors || '1'
       },
-      youtubeVideoId: body.youtubeVideoId || (body.videoUrl ? body.videoUrl.split('v=')[1]?.substring(0, 11) : 'dQw4w9WgXcQ'),
+      youtubeVideoId: body.youtubeVideoId || (body.videoUrl?.includes('v=') ? body.videoUrl.split('v=')[1]?.substring(0, 11) : (body.videoUrl?.includes('youtu.be/') ? body.videoUrl.split('youtu.be/')[1]?.substring(0, 11) : '')),
       galleryImages: Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
         ? body.galleryImages 
-        : (Array.isArray(body.images) && body.images.length > 0 ? body.images : ["https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80"]),
+        : (Array.isArray(body.images) ? body.images : []),
       description: body.description || '',
       componentsMatrix: Array.isArray(body.componentsMatrix) ? body.componentsMatrix : [],
       legalVerification: Array.isArray(body.legalVerification) ? body.legalVerification : [],
@@ -2296,17 +2387,17 @@ router.post('/', async (req, res) => {
 
       // Legacy fields
       location: body.location || `${body.locality || 'Central'}, ${body.city || 'Mangaluru'}`,
-      price: body.price || '₹2.50 Cr',
-      priceRaw: Number(body.priceRaw) || body.pricing?.expectedPrice || 25000000,
+      price: body.price || '',
+      priceRaw: Number(body.priceRaw) || body.pricing?.expectedPrice || 0,
       type: body.type || body.category || 'Villa',
       beds: Number(body.beds) || body.specs?.bedrooms || 0,
       baths: Number(body.baths) || body.specs?.bathrooms || 0,
-      area: body.area || `${body.specs?.carpetAreaSqFt || 2500} sq.ft`,
-      videoUrl: body.videoUrl || `https://www.youtube.com/watch?v=${body.youtubeVideoId || 'dQw4w9WgXcQ'}`,
-      images: Array.isArray(body.images) ? body.images : body.galleryImages || [],
+      area: body.area || (body.specs?.carpetAreaSqFt ? `${body.specs.carpetAreaSqFt} sq.ft` : ''),
+      videoUrl: body.videoUrl || (body.youtubeVideoId ? `https://www.youtube.com/watch?v=${body.youtubeVideoId}` : ''),
+      images: Array.isArray(body.images) ? body.images : (Array.isArray(body.galleryImages) ? body.galleryImages : []),
       badge: body.badge || 'Verified Listing',
       legalStatus: body.legalStatus || 'Clear Title / RERA Verified',
-      highlights: Array.isArray(body.highlights) ? body.highlights : ["Advocate Audited Clear Title", "Direct Ingress", "Verified Listing"]
+      highlights: Array.isArray(body.highlights) ? body.highlights : []
     });
 
     const saved = await newProperty.save();
@@ -2742,10 +2833,10 @@ const INITIAL_FORM_STATE = {
   furnishingStatus: 'Fully Furnished',
   floorLevel: 'G+1',
   totalFloors: '2',
-  youtubeVideoId: 'dQw4w9WgXcQ',
-  galleryImagesStr: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80\nhttps://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
-  description: 'Executive luxury estate with private landscaped grounds and panoramic coastal vistas.',
-  badge: 'Exclusive Tour',
+  youtubeVideoId: '',
+  galleryImagesStr: '',
+  description: '',
+  badge: 'Verified Listing',
   isFeatured: false,
   status: 'Active',
   advocateVerificationAvailable: true,
@@ -2755,61 +2846,21 @@ const INITIAL_FORM_STATE = {
 
   // Manual Strategic Transit & Infrastructure
   transitMatrix: DEFAULT_TRANSIT_MATRIX,
-  roadIngressText: '40ft Wide Asphalt Road',
-  zoningTagText: 'RERA Compliant',
+  roadIngressText: '',
+  zoningTagText: '',
 
   // Dynamic Self-Verifiable Legal Audit
   legalVerification: DEFAULT_12_POINT_LEGAL_CHECKLIST,
 
   // Investment Analysis
-  rentalYieldEst: '₹95,000 / mo (4.5% Gross Yield)',
-  resaleAppreciationEst: '11.0% - 13.5% Compound Y-o-Y',
-  localityGrowthDriver: 'High-growth residential belt with premium social infrastructure'
+  rentalYieldEst: '',
+  resaleAppreciationEst: '',
+  localityGrowthDriver: ''
 };
 
 const SAMPLE_PROPERTIES = [];
 
-const SAMPLE_INBOUND_LEADS = [
-  {
-    _id: "671e901",
-    id: "901",
-    ticketId: "TKT-901",
-    ownerName: "Muhammed Rashid",
-    phone: "+91 98470 12345",
-    location: "Bejai, Mangaluru",
-    assetType: "Apartment",
-    expectedPrice: "₹1.10 Cr",
-    details: "3BHK luxury apartment ready for title inspection and walkthrough verification.",
-    status: "New Inquiry",
-    createdAt: "2026-03-24T10:00:00.000Z"
-  },
-  {
-    _id: "671e902",
-    id: "902",
-    ticketId: "TKT-902",
-    ownerName: "Capt. Arvind Hegde",
-    phone: "+91 94481 67890",
-    location: "Kadri Hills, Mangaluru",
-    assetType: "Villa",
-    expectedPrice: "₹3.40 Cr",
-    details: "Colonial style 4BHK independent bungalow with private orchard and clear 40-year parent deed.",
-    status: "Contacted",
-    createdAt: "2026-03-23T14:30:00.000Z"
-  },
-  {
-    _id: "671e903",
-    id: "903",
-    ticketId: "TKT-903",
-    ownerName: "Dr. Ronald Pinto",
-    phone: "+91 98200 54321",
-    location: "Surathkal Beach Road",
-    assetType: "Plot",
-    expectedPrice: "₹85 Lakhs",
-    details: "Coastal residential development plot with CRZ-II clearance certificate and compound wall.",
-    status: "Archived / Resolved",
-    createdAt: "2026-03-22T09:15:00.000Z"
-  }
-];
+const SAMPLE_INBOUND_LEADS = [];
 
 export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated }) {
   const navigate = useNavigate();
@@ -2822,20 +2873,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const activeTab = isPublishRoute ? 'publish-listing' : (isMasterPresetsRoute ? 'master-presets' : internalTab);
 
   // Data states
-  const [properties, setProperties] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('grabmykey_properties');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed)) return parsed;
-        }
-      } catch (e) {
-        console.warn('Failed to load cached properties', e);
-      }
-    }
-    return SAMPLE_PROPERTIES;
-  });
+  const [properties, setProperties] = useState([]);
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -2846,7 +2884,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       }
     }
   }, [properties]);
-  const [leads, setLeads] = useState(SAMPLE_INBOUND_LEADS);
+  const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('All');
@@ -2875,10 +2913,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const [formStep, setFormStep] = useState(1);
   const [editingPropertyId, setEditingPropertyId] = useState(null);
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
-  const [uploadedFiles, setUploadedFiles] = useState([
-    { name: 'Deed_Verification_Chain.pdf', size: '4.2 MB', type: 'document' },
-    { name: 'Villa_Terrace_SeaView.jpg', size: '2.8 MB', type: 'image' }
-  ]);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
 
   // Hero Featured Video & Settings state
@@ -3032,13 +3067,17 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       await checkServerHealth();
 
       const propRes = await fetchProperties();
-      if (propRes?.success && Array.isArray(propRes.data) && propRes.data.length > 0) {
+      if (propRes?.success && Array.isArray(propRes.data)) {
         setProperties(propRes.data);
+      } else {
+        setProperties([]);
       }
 
       const leadRes = await fetchLeads();
-      if (leadRes?.success && Array.isArray(leadRes.data) && leadRes.data.length > 0) {
+      if (leadRes?.success && Array.isArray(leadRes.data)) {
         setLeads(leadRes.data);
+      } else {
+        setLeads([]);
       }
 
       try {
@@ -3165,7 +3204,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       furnishingStatus: prop.specs?.furnishingStatus || 'Fully Furnished',
       floorLevel: prop.specs?.floorLevel || 'G',
       totalFloors: prop.specs?.totalFloors || '1',
-      youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : 'dQw4w9WgXcQ'),
+      youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : ''),
       galleryImagesStr: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
         ? prop.galleryImages.join('\n')
         : (Array.isArray(prop.images) ? prop.images.join('\n') : ''),
@@ -3285,7 +3324,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return (match && match[2].length === 11) ? match[2] : raw;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.youtubeVideoId || "dQw4w9WgXcQ";
+    return prop?.youtubeVideoId || "";
   }, [heroSettings.heroCustomYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   const previewThumbnail = useMemo(() => {
@@ -3293,7 +3332,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return `https://img.youtube.com/vi/${previewYoutubeId}/maxresdefault.jpg`;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.images?.[0] || 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80';
+    return prop?.images?.[0] || '';
   }, [previewYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   // Dynamic Car-Style Feature Matrix Handlers
@@ -3501,7 +3540,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     const isLand = formData.category === 'Land/Plot';
     const parsedImages = formData.galleryImagesStr
       ? formData.galleryImagesStr.split('\n').map(s => s.trim()).filter(Boolean)
-      : ["https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80"];
+      : [];
 
     const priceNum = Number(formData.expectedPrice) || 25000000;
     const formatDisplayPrice = (val) => {
@@ -3538,7 +3577,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         floorLevel: formData.floorLevel || 'G',
         totalFloors: formData.totalFloors || '1'
       },
-      youtubeVideoId: formData.youtubeVideoId?.trim() || 'dQw4w9WgXcQ',
+      youtubeVideoId: formData.youtubeVideoId?.trim() || '',
       galleryImages: parsedImages,
       description: formData.description,
       componentsMatrix: formData.componentsMatrix || [],
@@ -3985,12 +4024,16 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                               {/* Asset Info & Thumbnail */}
                               <td className="py-4 px-6">
                                 <div className="flex items-center space-x-3">
-                                  <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs">
-                                    <img
-                                      src={prop.images?.[0] || 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=400&q=80'}
-                                      alt={prop.title}
-                                      className="w-full h-full object-cover"
-                                    />
+                                  <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs flex items-center justify-center">
+                                    {prop.images?.[0] ? (
+                                      <img
+                                        src={prop.images[0]}
+                                        alt={prop.title}
+                                        className="w-full h-full object-cover"
+                                      />
+                                    ) : (
+                                      <Building2 className="w-4 h-4 text-slate-400" />
+                                    )}
                                   </div>
                                   <div className="min-w-0">
                                     <span className="font-bold text-[#0a1d37] text-xs block truncate max-w-xs">{prop.title}</span>
@@ -4535,7 +4578,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                             <input
                               required
                               type="text"
-                              placeholder="e.g. dQw4w9WgXcQ or https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+                              placeholder="e.g. 7X8mLSQkg4Y or https://www.youtube.com/watch?v=..."
                               value={formData.youtubeVideoId}
                               onChange={e => {
                                 const val = e.target.value;
@@ -4557,27 +4600,29 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                           {showYoutubePicker && (
                             <div className="mt-3 p-4 bg-[#f8f6f0] border border-slate-200 rounded-2xl space-y-3">
                               <span className="text-xs font-mono font-bold text-[#0a1d37] uppercase tracking-wider block">
-                                Preset On-Site Walkthrough Tours:
+                                Existing Property Walkthrough Tours:
                               </span>
-                              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                                {[
-                                  { title: 'Featured Walkthrough Tour 1', id: 'dQw4w9WgXcQ' },
-                                  { title: 'Commercial Suite Walkthrough', id: 'dQw4w9WgXcQ' },
-                                  { title: 'Coastal Plantation Walkthrough', id: 'dQw4w9WgXcQ' }
-                                ].map((v, i) => (
-                                  <div
-                                    key={i}
-                                    onClick={() => {
-                                      setFormData({ ...formData, youtubeVideoId: v.id });
-                                      setShowYoutubePicker(false);
-                                    }}
-                                    className="p-3 bg-white hover:bg-amber-50/60 border border-slate-300 rounded-xl cursor-pointer text-xs transition-colors"
-                                  >
-                                    <p className="font-bold text-[#0a1d37]">{v.title}</p>
-                                    <span className="text-[10px] text-[#b8860b] font-semibold mt-1 block">Click to Apply</span>
-                                  </div>
-                                ))}
-                              </div>
+                              {properties.filter(p => p.youtubeVideoId).length > 0 ? (
+                                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                                  {properties.filter(p => p.youtubeVideoId).slice(0, 6).map((p, i) => (
+                                    <div
+                                      key={p._id || p.id || i}
+                                      onClick={() => {
+                                        setFormData({ ...formData, youtubeVideoId: p.youtubeVideoId });
+                                        setShowYoutubePicker(false);
+                                      }}
+                                      className="p-3 bg-white hover:bg-amber-50/60 border border-slate-300 rounded-xl cursor-pointer text-xs transition-colors"
+                                    >
+                                      <p className="font-bold text-[#0a1d37] truncate">{p.title}</p>
+                                      <span className="text-[10px] text-[#b8860b] font-semibold mt-1 block">Click to Apply ({p.youtubeVideoId})</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <p className="text-xs text-slate-500 py-1">
+                                  No previous video tours found. Enter a custom YouTube video ID or URL in the input above.
+                                </p>
+                              )}
                             </div>
                           )}
                         </div>
@@ -4591,7 +4636,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                             rows={4}
                             value={formData.galleryImagesStr}
                             onChange={e => setFormData({ ...formData, galleryImagesStr: e.target.value })}
-                            placeholder="https://images.unsplash.com/..."
+                            placeholder="https://example.com/property-photo.jpg (one URL per line)"
                             className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#0a1d37] font-mono focus:border-[#b8860b] focus:outline-none"
                           />
                         </div>
@@ -5335,7 +5380,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                         <Video className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
                         <input
                           type="text"
-                          placeholder="e.g. dQw4w9WgXcQ or https://www.youtube.com/watch?v=..."
+                          placeholder="e.g. 7X8mLSQkg4Y or https://www.youtube.com/watch?v=..."
                           value={heroSettings.heroCustomYoutubeId || ''}
                           onChange={(e) => setHeroSettings({ ...heroSettings, heroCustomYoutubeId: e.target.value })}
                           className="w-full bg-[#f8f6f0] border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-xs text-[#0a1d37] font-medium focus:outline-none focus:border-[#b8860b]"
@@ -6284,6 +6329,7 @@ import {
 } from 'lucide-react';
 import { 
   fetchProperties, 
+  fetchPropertyById,
   fetchLeads, 
   submitLead, 
   checkServerHealth,
@@ -6451,33 +6497,24 @@ export default function App() {
     };
   });
 
-  // Inbound seller requests
-  const [sellerRequests, setSellerRequests] = useState(() => [
-    {
-      id: "901",
-      ticketId: "TKT-901",
-      ownerName: "Muhammed Rashid",
-      phone: "+91 98470 12345",
-      location: "Bejai, Mangaluru",
-      assetType: "Apartment",
-      expectedPrice: "₹1.10 Cr",
-      details: "3BHK luxury apartment ready for title inspection and walkthrough verification.",
-      status: "Pending Inspection",
-      createdAt: "2026-03-24T10:00:00.000Z"
-    }
-  ]);
+  // Inbound seller requests (initialized to empty array)
+  const [sellerRequests, setSellerRequests] = useState([]);
 
   const loadData = async () => {
     setIsLoading(true);
     try {
       const propRes = await fetchProperties();
-      if (propRes?.success && Array.isArray(propRes.data) && propRes.data.length > 0) {
+      if (propRes?.success && Array.isArray(propRes.data)) {
         setProperties(propRes.data);
+      } else {
+        setProperties([]);
       }
 
       const leadRes = await fetchLeads();
-      if (leadRes?.success && Array.isArray(leadRes.data) && leadRes.data.length > 0) {
+      if (leadRes?.success && Array.isArray(leadRes.data)) {
         setSellerRequests(leadRes.data);
+      } else {
+        setSellerRequests([]);
       }
 
       const settingsRes = await fetchSiteSettings();
@@ -6500,8 +6537,29 @@ export default function App() {
     if (propertyIdFromUrl) {
       setSelectedPropertyId(propertyIdFromUrl);
       setActiveGalleryIdx(0);
+
+      const target = String(propertyIdFromUrl).toLowerCase();
+      const exists = Array.isArray(properties) && properties.some(p => 
+        String(p?.id || '').toLowerCase() === target || 
+        String(p?._id || '').toLowerCase() === target || 
+        String(p?.slug || '').toLowerCase() === target
+      );
+
+      if (!exists) {
+        fetchPropertyById(propertyIdFromUrl).then(res => {
+          if (res?.data) {
+            setProperties(prev => {
+              const currentList = Array.isArray(prev) ? prev : [];
+              if (currentList.some(p => String(p.id) === String(res.data.id) || p.slug === res.data.slug)) {
+                return currentList;
+              }
+              return [res.data, ...currentList];
+            });
+          }
+        }).catch(() => {});
+      }
     }
-  }, [propertyIdFromUrl]);
+  }, [propertyIdFromUrl, properties, setProperties]);
 
   // Check admin auth state when visiting admin routes
   useEffect(() => {
@@ -6598,9 +6656,7 @@ export default function App() {
 
   // Always ensure images is an array to prevent "Cannot read properties of undefined (reading 'images')"
   const featuredImages = featuredProperty?.images || featuredProperty?.galleryImages || [];
-  const primaryHeroImage = featuredImages.length > 0 
-    ? featuredImages[0] 
-    : "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80";
+  const primaryHeroImage = featuredImages.length > 0 ? featuredImages[0] : "";
 
   // Selected Property Object (matches by slug, id, or _id)
   const selectedProperty = useMemo(() => {
@@ -6696,7 +6752,7 @@ export default function App() {
     if (heroYoutubeId) {
       return `https://img.youtube.com/vi/${heroYoutubeId}/maxresdefault.jpg`;
     }
-    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80";
+    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
   }, [heroYoutubeId, heroFeaturedProperty]);
 
   const heroTitle = heroSettings?.heroOverlayTitle || heroFeaturedProperty?.title || "";
@@ -6904,7 +6960,7 @@ export default function App() {
         {/* VIEW: HOME STOREFRONT                                               */}
         {/* =================================================================== */}
         {activeView === 'home' && (
-          <div className="bg-[#FAF8F5] pt-2 pb-16 px-6 lg:px-16 max-w-[1536px] mx-auto">
+          <div className="bg-[#FAF8F5] w-full">
             <Home
               searchQuery={searchQuery}
               setSearchQuery={setSearchQuery}
@@ -7033,12 +7089,13 @@ export { PropertyDetails, NearbyInfrastructure, getTransitIcon, PropertyImageGal
 
 ```javascript
 import axios from 'axios';
-import { mockProperties } from './data/mockProperties';
 
 // Base API URL supporting localhost and public LAN network IP access
 const getApiBaseUrl = () => {
-  if (import.meta.env.VITE_API_BASE_URL) return import.meta.env.VITE_API_BASE_URL;
-  if (typeof window !== 'undefined' && window.location.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL;
+  }
+  if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
     return `http://${window.location.hostname}:5000/api`;
   }
   return 'http://localhost:5000/api';
@@ -7063,14 +7120,10 @@ export const setBackendOffline = (offline = true) => {
 export const shouldAttemptBackend = () => {
   if (typeof window === 'undefined') return false;
   // If explicitly disabled via env or storage
-  if (import.meta.env.VITE_BACKEND_ENABLED === 'false' || import.meta.env.VITE_FRONTEND_ONLY === 'true') {
+  if (import.meta?.env?.VITE_BACKEND_ENABLED === 'false' || import.meta?.env?.VITE_FRONTEND_ONLY === 'true') {
     return false;
   }
   if (localStorage.getItem('grabmykey_frontend_only') === 'true' || localStorage.getItem('gmk_offline_mode') === 'true') {
-    return false;
-  }
-  // If backend was detected offline in this session
-  if (isBackendOffline || sessionStorage.getItem('gmk_backend_offline') === 'true') {
     return false;
   }
   return true;
@@ -7081,15 +7134,16 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  timeout: 8000
+  timeout: 5000
 });
 
 // Interceptor for response unwrapping and error logging
 apiClient.interceptors.response.use(
-  (response) => response.data,
+  (response) => {
+    setBackendOffline(false);
+    return response.data;
+  },
   (error) => {
-    // Only warn for unexpected HTTP responses from a live server (e.g. 500, 403),
-    // and suppress standard connection refused / offline noise when backend isn't running
     const isOffline = error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || !error.response;
     if (isOffline) {
       setBackendOffline(true);
@@ -7102,78 +7156,215 @@ apiClient.interceptors.response.use(
 );
 
 /**
+ * Normalizes property keys to ensure complete compatibility across all UI components:
+ * PropertyCard, HeroFeaturedVideoCard, PropertyDetails, PropertySpecifications, etc.
+ */
+export const normalizeProperty = (p) => {
+  if (!p) return p;
+  const prop = { ...p };
+  const id = prop.id || (prop._id ? prop._id.toString() : prop.slug);
+  prop.id = id;
+  prop._id = prop._id || id;
+  prop.slug = prop.slug || id;
+  prop.title = prop.title || 'Prime Property';
+  prop.locality = prop.locality || (prop.location ? prop.location.split(',')[0].trim() : 'Surathkal Beach');
+  prop.city = prop.city || 'Mangaluru';
+  prop.location = prop.location || `${prop.locality}, ${prop.city}`;
+  prop.category = prop.category || prop.type || 'Villa';
+  prop.type = prop.type || prop.category || 'Villa';
+
+  const rawPrice = prop.priceRaw || prop.pricing?.expectedPrice || 0;
+  prop.priceRaw = rawPrice;
+  if (!prop.pricing) {
+    prop.pricing = { expectedPrice: rawPrice, isNegotiable: true, maintenanceFee: 0 };
+  }
+  if (!prop.price) {
+    prop.price = rawPrice >= 10000000
+      ? `₹${(rawPrice / 10000000).toFixed(2).replace(/\.00$/, '')} Cr`
+      : (rawPrice >= 100000 ? `₹${(rawPrice / 100000).toFixed(1).replace(/\.0$/, '')} Lakhs` : `₹${rawPrice.toLocaleString('en-IN')}`);
+  }
+  prop.priceText = prop.priceText || (prop.price ? String(prop.price).replace(/^₹/, '').replace(/ •.*/, '').trim() : '');
+
+  const imgs = (Array.isArray(prop.images) && prop.images.length > 0)
+    ? prop.images
+    : ((Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0)
+        ? prop.galleryImages
+        : []);
+  prop.images = imgs;
+  prop.galleryImages = imgs;
+  prop.thumbnail = prop.thumbnail || imgs[0] || '';
+
+  if (!prop.youtubeVideoId && prop.videoUrl) {
+    const match = prop.videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    prop.youtubeVideoId = match ? match[1] : '';
+  }
+  if (!prop.videoUrl && prop.youtubeVideoId) {
+    prop.videoUrl = `https://www.youtube.com/watch?v=${prop.youtubeVideoId}`;
+  }
+
+  if (!prop.specs) {
+    prop.specs = {
+      bedrooms: prop.bedrooms ?? prop.beds ?? 0,
+      bathrooms: prop.bathrooms ?? prop.baths ?? 0,
+      carpetAreaSqFt: prop.superArea ? parseInt(String(prop.superArea).replace(/[^0-9]/g, ''), 10) || 0 : 0,
+      furnishingStatus: prop.furnishing || 'Fully Furnished',
+      floorLevel: 'G',
+      totalFloors: '1'
+    };
+  }
+  prop.bedrooms = prop.bedrooms ?? prop.specs.bedrooms ?? prop.beds ?? 0;
+  prop.bathrooms = prop.bathrooms ?? prop.specs.bathrooms ?? prop.baths ?? 0;
+  prop.beds = prop.beds ?? prop.bedrooms;
+  prop.baths = prop.baths ?? prop.bathrooms;
+  prop.superArea = prop.superArea || prop.area || (prop.specs.carpetAreaSqFt ? `${prop.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft` : '');
+  prop.area = prop.area || prop.superArea;
+  prop.furnishing = prop.furnishing || prop.specs.furnishingStatus || 'Furnished';
+
+  prop.badge = prop.badge || (prop.isFeatured ? 'Featured Listing' : (prop.dealType || 'Exclusive Listing'));
+
+  if (!Array.isArray(prop.highlights)) {
+    prop.highlights = [];
+  }
+
+  if (!Array.isArray(prop.specifications) || prop.specifications.length === 0) {
+    if (Array.isArray(prop.componentsMatrix) && prop.componentsMatrix.length > 0) {
+      prop.specifications = prop.componentsMatrix.map(c => ({
+        category: c.categoryName || 'General',
+        feature: c.featureName || '',
+        status: c.isAvailable !== false ? 'Included' : 'Not Included',
+        details: c.descriptionNote || '—'
+      }));
+    }
+  }
+
+  return prop;
+};
+
+/**
  * Property Endpoints
  */
 
-// Fetch all live properties from MongoDB with graceful offline fallback to mock dataset
+// Filter utility to detect and eliminate any legacy mock property relics
+export const isMockProperty = (p) => {
+  if (!p) return true;
+  const title = p.title || '';
+  const slug = p.slug || '';
+  if (
+    title.includes('Coastal Horizon') ||
+    title.includes('Kadri Heights') ||
+    title.includes('Bejai Royal') ||
+    title.includes('Ullal Sovereign') ||
+    title.includes('Sovereign Heritage') ||
+    slug.includes('coastal-horizon') ||
+    slug.includes('kadri-heights') ||
+    slug.includes('bejai-royal') ||
+    slug.includes('ullal-sovereign') ||
+    p.youtubeVideoId === 'dQw4w9WgXcQ'
+  ) {
+    return true;
+  }
+  return false;
+};
+
+// Fetch all live properties exclusively from Express backend API
 export const fetchProperties = async () => {
-  const getFallback = () => {
+  const getCachedFallback = () => {
     let localData = [];
     if (typeof window !== 'undefined') {
       try {
         const cached = localStorage.getItem('grabmykey_properties');
         if (cached) {
           const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed) && parsed.length > 0) {
-            localData = parsed;
+          if (Array.isArray(parsed)) {
+            // Strictly exclude any legacy mock properties
+            localData = parsed.filter(p => !isMockProperty(p)).map(normalizeProperty);
+            // Resave sanitized version
+            localStorage.setItem('grabmykey_properties', JSON.stringify(localData));
           }
         }
       } catch (e) {
         localData = [];
       }
     }
-    const dataToReturn = localData.length > 0 ? localData : mockProperties;
     return {
-      success: true,
-      count: dataToReturn.length,
-      data: dataToReturn,
-      fromLocal: true
+      success: localData.length > 0,
+      count: localData.length,
+      data: localData,
+      fromCache: true
     };
   };
 
   if (!shouldAttemptBackend()) {
-    return getFallback();
+    return getCachedFallback();
   }
 
   try {
     const res = await apiClient.get('/properties');
-    if (res?.data && Array.isArray(res.data) && res.data.length > 0) {
+    if (res?.data && Array.isArray(res.data)) {
+      const sanitized = res.data.filter(p => !isMockProperty(p));
+      const normalizedData = sanitized.map(normalizeProperty);
       if (typeof window !== 'undefined') {
-        localStorage.setItem('grabmykey_properties', JSON.stringify(res.data));
+        localStorage.setItem('grabmykey_properties', JSON.stringify(normalizedData));
       }
-      return res;
+      return {
+        ...res,
+        count: normalizedData.length,
+        data: normalizedData
+      };
     }
-    // If backend is empty, fallback to pristine mockProperties collection
     return {
       success: true,
-      count: mockProperties.length,
-      data: mockProperties,
-      fromMock: true
+      count: 0,
+      data: []
     };
   } catch (err) {
-    setBackendOffline(true);
-    return getFallback();
+    return getCachedFallback();
   }
 };
 
-// Fetch single property by ID or Slug with fallback to mock data
+// Fetch single property by ID or Slug exclusively from Express backend API
 export const fetchPropertyById = async (id) => {
-  try {
-    const res = await apiClient.get(`/properties/${id}`);
-    if (res?.data) return res;
-    throw new Error('Property not found on server');
-  } catch (err) {
+  const getCachedFallback = () => {
     const target = String(id).toLowerCase();
-    const found = mockProperties.find(p => 
-      String(p?.id || '').toLowerCase() === target || 
-      String(p?._id || '').toLowerCase() === target || 
-      String(p?.slug || '').toLowerCase() === target
-    );
+    let found = null;
+    if (typeof window !== 'undefined') {
+      try {
+        const cached = localStorage.getItem('grabmykey_properties');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed)) {
+            found = parsed.find(p => 
+              (String(p?.id || '').toLowerCase() === target || 
+              String(p?._id || '').toLowerCase() === target || 
+              String(p?.slug || '').toLowerCase() === target) &&
+              !isMockProperty(p)
+            );
+          }
+        }
+      } catch (e) {}
+    }
     return {
       success: Boolean(found),
-      data: found || null,
-      fromMock: true
+      data: found ? normalizeProperty(found) : null,
+      fromCache: Boolean(found)
     };
+  };
+
+  if (!shouldAttemptBackend()) {
+    return getCachedFallback();
+  }
+
+  try {
+    const res = await apiClient.get(`/properties/${id}`);
+    if (res?.data && !isMockProperty(res.data)) {
+      return {
+        ...res,
+        data: normalizeProperty(res.data)
+      };
+    }
+    return getCachedFallback();
+  } catch (err) {
+    return getCachedFallback();
   }
 };
 
@@ -7390,14 +7581,7 @@ export default {
 import React from 'react';
 
 export default function ArchitecturalOverview({ description, highlights }) {
-  const defaultHighlights = [
-    "Verified Physical On-Site Inspection",
-    "Clear Title & Encumbrance Verified",
-    "Independent Access Road Frontage",
-    "High-Growth Residential & Commercial Corridor"
-  ];
-
-  const highlightList = highlights && highlights.length > 0 ? highlights : defaultHighlights;
+  const highlightList = Array.isArray(highlights) ? highlights : [];
 
   return (
     <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs p-6 md:p-8 space-y-6">
@@ -7414,30 +7598,37 @@ export default function ArchitecturalOverview({ description, highlights }) {
           Architectural Overview
         </h2>
 
-        <p className="text-sm md:text-base text-slate-600 leading-relaxed font-sans max-w-4xl">
-          {description || "Verified property listing with on-site physical inspection and authenticated documentation across Mangaluru."}
-        </p>
+        {description && (
+          <p className="text-sm md:text-base text-slate-600 leading-relaxed font-sans max-w-4xl">
+            {description}
+          </p>
+        )}
       </div>
 
-      <div className="h-px bg-slate-100 w-full" />
+      {highlightList.length > 0 && (
+        <>
+          <div className="h-px bg-slate-100 w-full" />
 
-      {/* Clean 4-Card Highlight Grid (No Sparkle Icons) */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
-        {highlightList.map((item, idx) => {
-          const labelText = typeof item === 'string' ? item : item.label;
+          {/* Clean Highlight Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 pt-2">
+            {highlightList.map((item, idx) => {
+              const labelText = typeof item === 'string' ? item : item?.label || '';
+              if (!labelText) return null;
 
-          return (
-            <div 
-              key={idx}
-              className="flex items-center justify-center text-center px-4 py-3.5 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 text-slate-800 shadow-2xs hover:border-[#C59B27] hover:bg-white transition-all cursor-default"
-            >
-              <span className="text-xs font-semibold font-sans leading-tight">
-                {labelText}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+              return (
+                <div 
+                  key={idx}
+                  className="flex items-center justify-center text-center px-4 py-3.5 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 text-slate-800 shadow-2xs hover:border-[#C59B27] hover:bg-white transition-all cursor-default"
+                >
+                  <span className="text-xs font-semibold font-sans leading-tight">
+                    {labelText}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -7478,24 +7669,26 @@ import React, { useState } from 'react';
 import { Play, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
 
-export function HeroFeaturedVideoCard({ property }) {
+export function HeroFeaturedVideoCard({ property = null }) {
   const [isPlaying, setIsPlaying] = useState(false);
+  const [featuredProperty, setFeaturedProperty] = useState(null);
 
-  if (!property) return null;
+  const activeProperty = property || featuredProperty;
+  if (!activeProperty) return null;
 
   const item = {
-    title: property.title || "Featured Property",
-    location: property.location || property.locality || "Mangaluru",
-    priceText: property.priceText || (property.price ? String(property.price).replace(/^₹/, '').replace(/ •.*/, '') : ''),
-    videoUrl: property.videoUrl || (property.youtubeVideoId ? `https://www.youtube.com/embed/${property.youtubeVideoId}?autoplay=1` : null),
-    thumbnail: property.thumbnail || property.images?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80',
-    slug: property.slug || property._id || property.id
+    title: activeProperty.title || "Exclusive Estate",
+    location: activeProperty.location || (activeProperty.locality ? `${activeProperty.locality}, ${activeProperty.city || 'Mangaluru'}` : "Mangaluru"),
+    priceText: activeProperty.priceText || (activeProperty.price ? String(activeProperty.price).replace(/^₹/, '').replace(/ •.*/, '') : ''),
+    videoUrl: activeProperty.videoUrl || (activeProperty.youtubeVideoId ? `https://www.youtube.com/embed/${activeProperty.youtubeVideoId}?autoplay=1` : null),
+    thumbnail: activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
+    slug: activeProperty.slug || activeProperty._id || activeProperty.id
   };
 
   return (
     <div className="relative w-full max-w-xl rounded-3xl overflow-hidden bg-slate-950 border border-slate-200 shadow-xl aspect-[16/11] flex flex-col justify-between p-6">
       
-      {isPlaying ? (
+      {isPlaying && item.videoUrl ? (
         <iframe
           src={item.videoUrl}
           title="Property Video Walkthrough"
@@ -7505,12 +7698,16 @@ export function HeroFeaturedVideoCard({ property }) {
         />
       ) : (
         <>
-          {/* Background Luxury Villa Poster */}
-          <img
-            src={item.thumbnail}
-            alt={item.title || "Featured Property Walkthrough"}
-            className="absolute inset-0 w-full h-full object-cover opacity-90"
-          />
+          {/* Background Poster */}
+          {item.thumbnail ? (
+            <img
+              src={item.thumbnail}
+              alt={item.title || "Featured Property Walkthrough"}
+              className="absolute inset-0 w-full h-full object-cover opacity-90"
+            />
+          ) : (
+            <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black" />
+          )}
 
           {/* Gradient Overlay */}
           <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-black/30 z-0" />
@@ -7526,15 +7723,17 @@ export function HeroFeaturedVideoCard({ property }) {
           </div>
 
           {/* Centered Circular Play Button */}
-          <div className="relative z-10 flex items-center justify-center my-auto">
-            <button
-              onClick={() => setIsPlaying(true)}
-              aria-label="Play Property Video Walkthrough"
-              className="w-16 h-16 rounded-full bg-slate-900/80 text-white flex items-center justify-center border border-white/20 shadow-2xl hover:scale-110 hover:bg-slate-900 transition-all cursor-pointer"
-            >
-              <Play className="w-6 h-6 fill-current ml-0.5"/>
-            </button>
-          </div>
+          {item.videoUrl && (
+            <div className="relative z-10 flex items-center justify-center my-auto">
+              <button
+                onClick={() => setIsPlaying(true)}
+                aria-label="Play Property Video Walkthrough"
+                className="w-16 h-16 rounded-full bg-slate-900/80 text-white flex items-center justify-center border border-white/20 shadow-2xl hover:scale-110 hover:bg-slate-900 transition-all cursor-pointer"
+              >
+                <Play className="w-6 h-6 fill-current ml-0.5"/>
+              </button>
+            </div>
+          )}
 
           {/* Bottom Glassmorphism Property Overlay */}
           <div className="relative z-10 p-4 rounded-2xl bg-slate-900/60 backdrop-blur-md border border-white/10 flex items-center justify-between gap-3">
@@ -7543,14 +7742,14 @@ export function HeroFeaturedVideoCard({ property }) {
                 {item.title}
               </h3>
               <p className="text-xs text-slate-300 font-sans truncate">
-                {item.location} • <span className="text-white font-semibold">₹{item.priceText}</span>
+                {item.location} {item.priceText ? <span className="text-white font-semibold">• ₹{item.priceText}</span> : ''}
               </p>
             </div>
 
             <Link 
               className="w-9 h-9 rounded-full bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center text-white hover:bg-white hover:text-slate-950 transition-colors shrink-0 cursor-pointer" 
               title="View Property" 
-              to={`/property/${item.slug}`}
+              to={item.slug ? `/property/${item.slug}` : '/properties'}
             >
               <ArrowUpRight className="w-4 h-4"/>
             </Link>
@@ -7663,20 +7862,20 @@ export default function Navbar({ activeView, onNavigate }) {
 ```jsx
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { MapPin } from 'lucide-react';
+import { MapPin, Building2 } from 'lucide-react';
 
 export default function PropertyCard({ property }) {
   if (!property) return null;
 
-  const propId = property.id || property._id || property.slug || '1';
+  const propId = property.id || property._id || property.slug || '';
   const propSlug = property.slug || propId;
-  const propTitle = property.title || 'Prime Property';
+  const propTitle = property.title || 'Untitled Property';
   const propLocation = property.location || property.locality || 'Mangaluru';
-  const propBadge = property.badge || property.category || property.type || 'Prime Listing';
-  const propDescription = property.description || 'Verified luxury property ready for on-site inspection and video walkthrough.';
+  const propBadge = property.badge || property.category || property.type || 'Exclusive Listing';
+  const propDescription = property.description || '';
 
-  // Image handling with safe fallbacks
-  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80";
+  // Image handling from live backend records (zero static fallbacks)
+  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
 
   // Price formatting
   const propPrice = property.price || (
@@ -7690,12 +7889,19 @@ export default function PropertyCard({ property }) {
   return (
     <div className="bg-white border border-slate-200/80 hover:border-[#C59B27]/40 rounded-2xl overflow-hidden transition-all duration-200 group flex flex-col justify-between shadow-xs hover:shadow-xl">
       <Link to={`/property/${propSlug}`} className="block">
-        <div className="relative h-56 overflow-hidden bg-slate-100">
-          <img 
-            src={propImage} 
-            alt={propTitle}
-            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-          />
+        <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
+          {propImage ? (
+            <img 
+              src={propImage} 
+              alt={propTitle}
+              className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+            />
+          ) : (
+            <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400">
+              <Building2 className="w-8 h-8 stroke-[1.5] mb-1" />
+              <span className="text-[10px] font-sans font-medium uppercase tracking-wider">No Image Available</span>
+            </div>
+          )}
           <div className="absolute top-3 left-3">
             <span className="bg-white/95 text-[#0a1d37] font-semibold text-[10px] uppercase tracking-wider px-2.5 py-1 rounded-full border border-[#0a1d37]/20 shadow-xs font-sans">
               {propBadge}
@@ -7714,9 +7920,11 @@ export default function PropertyCard({ property }) {
           >
             {propTitle}
           </h3>
-          <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
-            {propDescription}
-          </p>
+          {propDescription && (
+            <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
+              {propDescription}
+            </p>
+          )}
         </div>
       </Link>
 
@@ -7778,30 +7986,12 @@ const getYouTubeWatchUrl = (url) => {
     : url;
 };
 
-// Safe fallback specs generator
+// Dynamic specs generator from property fields
 const getDefaultSpecs = (prop) => {
   if (!prop) {
     return {
-      inventorySpecs: {
-        bedrooms: 0,
-        bathrooms: 0,
-        halls: "N/A",
-        garden: "N/A",
-        furnishing: "N/A",
-        furnitureAppliances: "N/A",
-        kitchenType: "N/A",
-        parking: "N/A",
-        balconies: "N/A",
-        flooring: "N/A",
-        powerBackup: "N/A",
-        waterSupply: "N/A"
-      },
-      technicalSpecs: {
-        roadWidth: "N/A",
-        powerBackup: "N/A",
-        waterSource: "N/A",
-        zoning: "N/A"
-      },
+      inventorySpecs: {},
+      technicalSpecs: {},
       connectivity: [],
       financials: {
         monthlyRental: "N/A",
@@ -7814,54 +8004,41 @@ const getDefaultSpecs = (prop) => {
   }
 
   const isCommercial = prop?.type === 'Commercial' || prop?.category === 'Commercial';
-  const isEstate = prop?.type === 'Estate' || prop?.category === 'Estate';
   const isPlot = prop?.type === 'Plot / Land' || prop?.type === 'Plot' || prop?.category === 'Plot' || prop?.category === 'Land/Plot';
-  const priceVal = prop?.priceRaw || prop?.pricing?.expectedPrice || (parseInt((prop?.price || '').replace(/[^0-9]/g, '')) * 100000) || 25000000;
-  const stampDutyVal = `8.0% (~₹${(priceVal * 0.08 / 100000).toFixed(1)} Lakhs)`;
-  const estRent = `₹${Math.round(priceVal * (isCommercial ? 0.006 : 0.0035)).toLocaleString('en-IN')} / mo`;
+  const priceVal = prop?.priceRaw || prop?.pricing?.expectedPrice || (parseInt((prop?.price || '').replace(/[^0-9]/g, ''), 10) * 100000) || 0;
+  const stampDutyVal = priceVal ? `8.0% (~₹${(priceVal * 0.08 / 100000).toFixed(1)} Lakhs)` : 'N/A';
+  const estRent = priceVal ? `₹${Math.round(priceVal * (isCommercial ? 0.006 : 0.0035)).toLocaleString('en-IN')} / mo` : 'N/A';
 
   const inventorySpecs = prop?.inventorySpecs || {
-    bedrooms: isPlot ? 0 : (prop?.specs?.bedrooms ?? prop?.beds ?? (isCommercial ? 0 : isEstate ? 5 : 4)),
-    bathrooms: isPlot ? 0 : (prop?.specs?.bathrooms ?? prop?.baths ?? (isCommercial ? 2 : isEstate ? 6 : 5)),
-    halls: isPlot ? "N/A - Plot Asset" : (isCommercial ? "3 (Reception + Workstation Hall + Boardroom)" : "2 (Formal Living + Lounge)"),
-    garden: isPlot ? "Open Land Parcel" : (isCommercial ? "No (Terrace Access)" : "Yes (Private Landscaped Lawn)"),
-    furnishing: isPlot ? "Unfurnished (Plot)" : (isCommercial ? "Semi-Furnished (Workstation Ready)" : (prop?.specs?.furnishingStatus || "Fully Furnished")),
-    furnitureAppliances: isPlot 
-      ? "N/A - Open Land Parcel Ready for Immediate Construction"
-      : isCommercial 
-      ? "16 Ergonomic Workstations, Boardroom Table, 3 Cassette ACs, Server Rack" 
-      : isEstate
-      ? "Antique Rosewood Chairs, 4-Poster Teak Beds, Traditional Brass Lamps, Modern Appliances"
-      : "Teakwood Dining Table with 6 Chairs, Italian Leather Sofas, 5 Inverter ACs, Smart Refrigerator, Home Theater",
-    kitchenType: isPlot ? "N/A" : (isCommercial ? "Pantry & Cafeteria Nook with Microwave Station" : "Modular Italian Kitchen with Island Hob & Hood"),
-    parking: isPlot ? "Direct Access Driveway" : (isCommercial ? "2 Reserved Underground Basement Slots" : isEstate ? "Covered Portico for 4 SUVs" : "2 Covered Slots + EV Fast Charger"),
-    balconies: isPlot ? "N/A" : (isCommercial ? "1 Road-Facing Executive Veranda" : isEstate ? "Wrap-Around Heritage Verandahs" : "3 Sea-Facing Sundecks"),
-    flooring: isPlot ? "Natural Ground / Graded" : (isCommercial ? "Heavy-Duty Vitrified Commercial Tiles" : isEstate ? "Terracotta & Polished Teakwood Planks" : "Italian Marble & Teakwood Parquet"),
-    powerBackup: isCommercial ? "25KW 3-Phase + 100% Dedicated DG Failover" : "15KW 3-Phase + 100% Generator Backup",
-    waterSupply: isEstate ? "Mountain Stream + Spring Well" : "Open Well + City Corporation Supply"
+    bedrooms: isPlot ? 0 : (prop?.specs?.bedrooms ?? prop?.beds ?? 0),
+    bathrooms: isPlot ? 0 : (prop?.specs?.bathrooms ?? prop?.baths ?? 0),
+    halls: isPlot ? "N/A - Plot Asset" : (prop?.specs?.halls || "Standard"),
+    garden: isPlot ? "Open Land Parcel" : (prop?.specs?.garden || "N/A"),
+    furnishing: prop?.specs?.furnishingStatus || prop?.furnishing || "Unfurnished",
+    furnitureAppliances: prop?.specs?.furnitureAppliances || "Standard",
+    kitchenType: isPlot ? "N/A" : (prop?.specs?.kitchenType || "Standard"),
+    parking: prop?.specs?.parking || "Standard Access",
+    balconies: isPlot ? "N/A" : (prop?.specs?.balconies || "N/A"),
+    flooring: prop?.specs?.flooring || "Standard",
+    powerBackup: prop?.specs?.powerBackup || prop?.powerBackup || "Standard",
+    waterSupply: prop?.specs?.waterSupply || prop?.waterSupply || "Municipal / Well"
   };
 
   const technicalSpecs = prop?.technicalSpecs || {
-    roadWidth: isCommercial ? "60ft Four-Lane Arterial Road" : isEstate ? "30ft Paved Plantation Access" : "40ft Tar Road",
-    powerBackup: isCommercial ? "3-Phase 25KW + 100% Dedicated DG" : isEstate ? "3-Phase 20KW + Solar Hybrid" : "3-Phase 15KW + 100% DG Backup",
-    waterSource: isEstate ? "Perennial Stream + Well" : "Open Well + Corporation Supply",
-    zoning: isCommercial ? "Commercial Khata A Approved" : isEstate ? "Freehold Plantation (Non-EFL)" : "Residential / RERA Approved"
+    roadWidth: prop?.roadWidth || "Standard Approach",
+    powerBackup: prop?.powerBackup || "Standard",
+    waterSource: prop?.waterSupply || "Standard",
+    zoning: prop?.zoning || "Approved"
   };
 
-  const connectivity = (Array.isArray(prop?.connectivity) && prop.connectivity.length > 0) ? prop.connectivity : [
-    { label: "Mangaluru Intl Airport (IXE)", distance: "14 km • 20 mins", type: "airport" },
-    { label: "National Highway (NH-66 / Coastal Corridor)", distance: "1.2 km • 3 mins", type: "highway" },
-    { label: "Main Railway Junction", distance: "6.5 km • 12 mins", type: "railway" },
-    { label: "Super-Specialty Hospital", distance: "3.5 km • 8 mins", type: "hospital" },
-    { label: "International School / University", distance: "2.8 km • 6 mins", type: "school" }
-  ];
+  const connectivity = Array.isArray(prop?.connectivity) ? prop.connectivity : [];
 
   const financials = prop?.financials || {
-    monthlyRental: isPlot ? "N/A (Capital Appreciation Asset)" : estRent,
-    rentalYield: isPlot ? "12.0% - 15.0% Capital Yield" : (isCommercial ? "7.2% Commercial Yield" : "4.5% - 5.2% Gross Yield"),
-    propertyTax: `₹${isCommercial ? '24,000' : '18,500'} / year (Municipal SAS)`,
+    monthlyRental: isPlot ? "N/A (Capital Asset)" : estRent,
+    rentalYield: prop?.investmentAnalysis?.rentalYieldEst || (priceVal ? (isCommercial ? "7.0% - 8.5%" : "4.0% - 5.5%") : "N/A"),
+    propertyTax: priceVal ? `₹${isCommercial ? '24,000' : '18,500'} / yr` : "N/A",
     stampDuty: stampDutyVal,
-    appreciation: isEstate || isPlot ? "12.5% - 15.0% Y-o-Y" : "11.2% - 13.5% Y-o-Y"
+    appreciation: prop?.investmentAnalysis?.resaleAppreciationEst || "10.0% - 13.0% Y-o-Y"
   };
 
   return { inventorySpecs, technicalSpecs, connectivity, financials };
@@ -7887,14 +8064,7 @@ export const getTransitIcon = (mode, name = '') => {
 };
 
 export function NearbyInfrastructure({ property, className = "" }) {
-  const transitList = property?.transitMatrix?.length > 0 
-    ? property.transitMatrix 
-    : [
-        { landmarkName: "Mangaluru International Airport (IXE)", travelMode: "Flight", distanceText: "14.2 km", durationText: "20m" },
-        { landmarkName: "Surathkal Railway Station", travelMode: "Transit", distanceText: "3.5 km", durationText: "8m" },
-        { landmarkName: "NITK Surathkal Campus & Beach", travelMode: "Drive", distanceText: "2.1 km", durationText: "5m" },
-        { landmarkName: "Mangalore City Central / Hampankatta", travelMode: "Drive", distanceText: "17.5 km", durationText: "25m" }
-      ];
+  const transitList = Array.isArray(property?.transitMatrix) ? property.transitMatrix : [];
 
   return (
     <div className={`bg-white rounded-2xl p-6 border border-slate-200/80 space-y-5 shadow-xs ${className}`}>
@@ -7906,34 +8076,38 @@ export function NearbyInfrastructure({ property, className = "" }) {
 
       {/* Clean Transit List */}
       <div className="space-y-3">
-        {transitList.map((item, idx) => (
-          <div key={idx} className="flex items-center justify-between text-xs py-1.5">
-            
-            {/* Left: Icon Tile + Landmark Name */}
-            <div className="flex items-center gap-3 min-w-0">
-              <div className="w-8 h-8 rounded-lg bg-[#FAF8F5] border border-slate-200/50 flex items-center justify-center shrink-0 shadow-2xs">
-                {getTransitIcon(item.travelMode || item.transportMode, item.landmarkName || item.destination)}
+        {transitList.length === 0 ? (
+          <p className="text-xs text-slate-500 font-sans py-1">No transit landmarks recorded for this property.</p>
+        ) : (
+          transitList.map((item, idx) => (
+            <div key={idx} className="flex items-center justify-between text-xs py-1.5">
+              
+              {/* Left: Icon Tile + Landmark Name */}
+              <div className="flex items-center gap-3 min-w-0">
+                <div className="w-8 h-8 rounded-lg bg-[#FAF8F5] border border-slate-200/50 flex items-center justify-center shrink-0 shadow-2xs">
+                  {getTransitIcon(item.travelMode || item.transportMode, item.landmarkName || item.destination)}
+                </div>
+                <span className="font-semibold text-slate-800 text-xs truncate">
+                  {item.landmarkName || item.destination}
+                </span>
               </div>
-              <span className="font-semibold text-slate-800 text-xs truncate">
-                {item.landmarkName || item.destination}
-              </span>
-            </div>
 
-            {/* Right: Clean Distance & Duration */}
-            <div className="text-right shrink-0 font-medium text-xs text-slate-500 pl-2">
-              <span>{item.distanceText || (item.distanceKm ? `${item.distanceKm} km` : '')}</span>
-              <span className="text-slate-300 mx-1.5">•</span>
-              <span className="text-amber-700 font-bold">{item.durationText || (item.travelTimeMins ? `${item.travelTimeMins}m` : '')}</span>
-            </div>
+              {/* Right: Clean Distance & Duration */}
+              <div className="text-right shrink-0 font-medium text-xs text-slate-500 pl-2">
+                <span>{item.distanceText || (item.distanceKm ? `${item.distanceKm} km` : '')}</span>
+                <span className="text-slate-300 mx-1.5">•</span>
+                <span className="text-amber-700 font-bold">{item.durationText || (item.travelTimeMins ? `${item.travelTimeMins}m` : '')}</span>
+              </div>
 
-          </div>
-        ))}
+            </div>
+          ))
+        )}
       </div>
 
       {/* Footer Details */}
       <div className="pt-3 border-t border-slate-100 flex items-center justify-between text-[11px]">
-        <span className="text-slate-500 font-medium">{property?.roadIngressText || '40ft Wide Asphalt Road'}</span>
-        <span className="font-bold text-emerald-700 tracking-wide">{property?.zoningTagText || 'RERA Compliant'}</span>
+        <span className="text-slate-500 font-medium">{property?.roadIngressText || 'Approach Road Frontage'}</span>
+        <span className="font-bold text-emerald-700 tracking-wide">{property?.zoningTagText || 'Title Verified'}</span>
       </div>
 
     </div>
@@ -7977,22 +8151,22 @@ export default function PropertyDetails({
 
   // Specs & Display Bindings with Safe Fallbacks
   const specs = propSpecsInput || getDefaultSpecs(property);
-  const propDisplayId = property?.id || property?._id || "1";
-  const propDisplaySlug = property?.slug || `gmk-${propDisplayId}`;
+  const propDisplayId = property?.id || property?._id || "";
+  const propDisplaySlug = property?.slug || propDisplayId;
   const propDisplayLocation = property?.locality 
     ? `${property.locality}, ${property.city}` 
     : (property?.location || "Mangaluru");
-  const propDisplayPrice = property?.price || (property?.pricing?.expectedPrice ? (property.pricing.expectedPrice >= 10000000 ? `₹${(property.pricing.expectedPrice / 10000000).toFixed(2)} Cr` : `₹${(property.pricing.expectedPrice / 100000).toFixed(1)} Lakhs`) : '₹1.50 Cr');
-  const propDisplayPriceRaw = property?.priceRaw || property?.pricing?.expectedPrice || 15000000;
-  const propDisplayType = property?.category || property?.type || 'Villa';
+  const propDisplayPrice = property?.price || (property?.pricing?.expectedPrice ? (property.pricing.expectedPrice >= 10000000 ? `₹${(property.pricing.expectedPrice / 10000000).toFixed(2)} Cr` : `₹${(property.pricing.expectedPrice / 100000).toFixed(1)} Lakhs`) : 'Price on Request');
+  const propDisplayPriceRaw = property?.priceRaw || property?.pricing?.expectedPrice || 0;
+  const propDisplayType = property?.category || property?.type || 'Estate';
   const propDisplayArea = property?.specs?.carpetAreaSqFt 
     ? `${property.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft` 
-    : (property?.area || '2,400 sq.ft');
-  const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 4;
-  const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 4;
+    : (property?.area || 'N/A');
+  const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 0;
+  const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 0;
   const propDisplayImages = (property?.galleryImages && property.galleryImages.length > 0)
     ? property.galleryImages
-    : ((property?.images && property.images.length > 0) ? property.images : ['https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1200&q=80']);
+    : ((property?.images && property.images.length > 0) ? property.images : []);
   const propDisplayVideoUrl = property?.youtubeVideoId 
     ? `https://www.youtube.com/watch?v=${property.youtubeVideoId}` 
     : property?.videoUrl;
@@ -8424,7 +8598,7 @@ export default function PropertyDetails({
                 Unit Rate
               </div>
               <div className="text-xl font-serif font-bold text-slate-900">
-                ₹{property.sqftPrice || (propDisplayPriceRaw ? Math.round(propDisplayPriceRaw / (parseInt((propDisplayArea || '1').replace(/[^0-9]/g, '')) || 1)).toLocaleString('en-IN') : '9,167')}
+                {property.sqftPrice || (propDisplayPriceRaw && parseInt((propDisplayArea || '0').replace(/[^0-9]/g, '')) > 0 ? `₹${Math.round(propDisplayPriceRaw / parseInt((propDisplayArea || '1').replace(/[^0-9]/g, ''))).toLocaleString('en-IN')}` : 'N/A')}
                 <span className="text-[10px] font-sans text-slate-400 font-normal">/sq.ft</span>
               </div>
             </div>
@@ -8434,7 +8608,7 @@ export default function PropertyDetails({
                 Est. Rent
               </div>
               <div className="text-xl font-serif font-bold text-slate-900">
-                ₹{(property.rentalEstimate || property?.investmentAnalysis?.rentalYieldEst?.split(' ')[0] || specs?.financials?.monthlyRental || '1.45L').replace(/^₹/, '').replace(' / mo', '')}
+                {(property.rentalEstimate || property?.investmentAnalysis?.rentalYieldEst?.split(' ')[0] || specs?.financials?.monthlyRental || 'N/A').replace(/^₹/, '').replace(' / mo', '')}
                 <span className="text-[10px] font-sans text-slate-400 font-normal">/mo</span>
               </div>
             </div>
@@ -8444,7 +8618,7 @@ export default function PropertyDetails({
                 Appreciation
               </div>
               <div className="text-xl font-serif font-bold text-amber-700">
-                {property.appreciationRate || (property?.investmentAnalysis?.resaleAppreciationEst ? property.investmentAnalysis.resaleAppreciationEst.split(' ')[0].replace('Compound', '').trim() : '11 - 13%')}
+                {property.appreciationRate || (property?.investmentAnalysis?.resaleAppreciationEst ? property.investmentAnalysis.resaleAppreciationEst.split(' ')[0].replace('Compound', '').trim() : (specs?.financials?.appreciation || 'N/A'))}
               </div>
             </div>
           </div>
@@ -8453,11 +8627,11 @@ export default function PropertyDetails({
           <div className="grid grid-cols-2 gap-3 pt-1 text-xs">
             <div className="flex justify-between items-center bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-100">
               <span className="text-slate-500 text-[11px]">Property Tax</span>
-              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.propertyTax ? specs.financials.propertyTax.replace(' / year', ' / yr') : '₹18.5K / yr'}</span>
+              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.propertyTax ? specs.financials.propertyTax.replace(' / year', ' / yr') : 'N/A'}</span>
             </div>
             <div className="flex justify-between items-center bg-slate-50 px-3.5 py-2.5 rounded-lg border border-slate-100">
               <span className="text-slate-500 text-[11px]">Stamp Duty</span>
-              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.stampDuty ? specs.financials.stampDuty.replace('Lakhs', 'L') : '8.0% (~₹30.8L)'}</span>
+              <span className="font-bold text-slate-900 text-[11px]">{specs?.financials?.stampDuty ? specs.financials.stampDuty.replace('Lakhs', 'L') : 'N/A'}</span>
             </div>
           </div>
         </div>
@@ -8482,7 +8656,7 @@ export { PropertyImageGallery, ArchitecturalOverview, Footer };
 
 ```jsx
 import React, { useState, useRef, useEffect } from 'react';
-import { X, ChevronLeft, ChevronRight, Maximize2 } from 'lucide-react';
+import { X, ChevronLeft, ChevronRight, Maximize2, Building2 } from 'lucide-react';
 
 export default function PropertyImageGallery({ 
   images = [], 
@@ -8498,14 +8672,8 @@ export default function PropertyImageGallery({
   const [zoomPos, setZoomPos] = useState({ x: 0, y: 0, percentageX: 0, percentageY: 0 });
   const imageRef = useRef(null);
 
-  const defaultImages = [
-    "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80",
-    "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80",
-    "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80"
-  ];
-
-  const galleryImages = images && images.length > 0 ? images : defaultImages;
-  const currentImage = galleryImages[selectedImage] || galleryImages[0];
+  const galleryImages = Array.isArray(images) && images.length > 0 ? images : [];
+  const currentImage = galleryImages[selectedImage] || galleryImages[0] || '';
 
   const handleMouseMove = (e) => {
     if (!imageRef.current) return;
@@ -8539,6 +8707,20 @@ export default function PropertyImageGallery({
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isModalOpen, galleryImages.length]);
+
+  if (galleryImages.length === 0) {
+    return (
+      <div className="space-y-4">
+        <h3 className="text-2xl font-bold text-[#0F172A] font-serif" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+          Photos
+        </h3>
+        <div className="relative h-[320px] rounded-2xl bg-slate-100 border border-slate-200/80 flex flex-col items-center justify-center text-slate-400">
+          <Building2 className="w-10 h-10 mb-2 stroke-[1.5]" />
+          <span className="text-xs font-sans font-medium uppercase tracking-wider">No Gallery Images Uploaded</span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -8730,17 +8912,7 @@ import { Layers, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
 export default function PropertySpecifications({ specifications = [] }) {
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const defaultSpecs = [
-    { category: "Build & Materials", feature: "Flooring Type", status: "Included", details: "Imported Italian Marble (Living) + Teak Hardwood (Bedrooms)" },
-    { category: "Build & Materials", feature: "Wood & Joinery", status: "Included", details: "100% Seasoned Burma Teakwood (Doors, Frames & Windows)" },
-    { category: "Build & Materials", feature: "Wall Finish & Paint", status: "Included", details: "ROYAL Silk Emulsion + Texture Accent Walls" },
-    { category: "Build & Materials", feature: "Structural Frame", status: "Included", details: "Earthquake Resistant RCC Framed Structure (M25 Grade)" },
-    { category: "Build & Materials", feature: "Sanitaryware & Fittings", status: "Included", details: "Kohler / Grohe Concealed Diverters & Wall-Hung Closets" },
-    { category: "Interior & Living", feature: "Modular Kitchen", status: "Included", details: "Faber Chimney, Blum Soft-Close Hardware & Quartz Island" },
-    { category: "Interior & Living", feature: "Air Conditioning", status: "Included", details: "Daikin VRV Centralized Inverter Climate Control" }
-  ];
-
-  const specsList = specifications && specifications.length > 0 ? specifications : defaultSpecs;
+  const specsList = Array.isArray(specifications) ? specifications : [];
   const visibleSpecs = isExpanded ? specsList : specsList.slice(0, 3);
 
   return (
@@ -8774,48 +8946,58 @@ export default function PropertySpecifications({ specifications = [] }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100 text-xs font-sans">
-            {visibleSpecs.map((item, index) => (
-              <tr key={index} className="hover:bg-slate-50/60 transition-colors">
-                <td className="py-4 px-6 whitespace-nowrap">
-                  <span className="inline-block px-3 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold text-[11px]">
-                    {item.category}
-                  </span>
-                </td>
-                <td className="py-4 px-6 font-bold text-[#0F172A] whitespace-nowrap">
-                  {item.feature}
-                </td>
-                <td className="py-4 px-6 whitespace-nowrap">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
-                    <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]"/>
-                    {item.status}
-                  </span>
-                </td>
-                <td className="py-4 px-6 text-slate-600 leading-relaxed max-w-lg">
-                  {item.details}
+            {specsList.length === 0 ? (
+              <tr>
+                <td colSpan="4" className="py-8 text-center text-slate-500 font-sans">
+                  No specifications currently recorded for this property.
                 </td>
               </tr>
-            ))}
+            ) : (
+              visibleSpecs.map((item, index) => (
+                <tr key={index} className="hover:bg-slate-50/60 transition-colors">
+                  <td className="py-4 px-6 whitespace-nowrap">
+                    <span className="inline-block px-3 py-1 rounded-lg bg-slate-100 text-slate-700 font-semibold text-[11px]">
+                      {item.category}
+                    </span>
+                  </td>
+                  <td className="py-4 px-6 font-bold text-[#0F172A] whitespace-nowrap">
+                    {item.feature}
+                  </td>
+                  <td className="py-4 px-6 whitespace-nowrap">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+                      <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]"/>
+                      {item.status}
+                    </span>
+                  </td>
+                  <td className="py-4 px-6 text-slate-600 leading-relaxed max-w-lg">
+                    {item.details}
+                  </td>
+                </tr>
+              ))
+            )}
           </tbody>
         </table>
       </div>
 
       {/* Simplified Toggle Button Footer */}
-      <div className="p-4 bg-slate-50/70 border-t border-slate-200/60 flex justify-center">
-        <button
-          onClick={() => setIsExpanded(!isExpanded)}
-          className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white border border-[#C59B27]/40 text-[#0F172A] hover:border-[#C59B27] hover:bg-[#FAF8F5] transition-all text-xs font-bold font-sans shadow-xs cursor-pointer"
-        >
-          {isExpanded ? (
-            <>
-              Show Less <ChevronUp className="w-4 h-4 text-[#C59B27]"/>
-            </>
-          ) : (
-            <>
-              View All ({specsList.length}) <ChevronDown className="w-4 h-4 text-[#C59B27]"/>
-            </>
-          )}
-        </button>
-      </div>
+      {specsList.length > 3 && (
+        <div className="p-4 bg-slate-50/70 border-t border-slate-200/60 flex justify-center">
+          <button
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="flex items-center gap-2 px-6 py-2.5 rounded-full bg-white border border-[#C59B27]/40 text-[#0F172A] hover:border-[#C59B27] hover:bg-[#FAF8F5] transition-all text-xs font-bold font-sans shadow-xs cursor-pointer"
+          >
+            {isExpanded ? (
+              <>
+                Show Less <ChevronUp className="w-4 h-4 text-[#C59B27]"/>
+              </>
+            ) : (
+              <>
+                View All ({specsList.length}) <ChevronDown className="w-4 h-4 text-[#C59B27]"/>
+              </>
+            )}
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -8843,7 +9025,7 @@ export default function PropertySummaryCard({ property = {} }) {
             PLOT AREA
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.plotArea || property.superArea || property.area || "12.5 Cents"}
+            {property.plotArea || property.superArea || property.area || "Not Specified"}
           </p>
         </div>
 
@@ -8853,7 +9035,7 @@ export default function PropertySummaryCard({ property = {} }) {
             BOUNDARY / FENCING
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.boundary || "Gated Compound"}
+            {property.boundary || "Not Specified"}
           </p>
         </div>
 
@@ -8863,7 +9045,7 @@ export default function PropertySummaryCard({ property = {} }) {
             ZONING TYPE
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.zoning || "Residential Conversion"}
+            {property.zoning || "Not Specified"}
           </p>
         </div>
 
@@ -8873,7 +9055,7 @@ export default function PropertySummaryCard({ property = {} }) {
             ROAD FRONTAGE
           </span>
           <p className="text-sm font-bold text-[#0F172A] font-sans">
-            {property.roadWidth || "30 ft Concrete Road"}
+            {property.roadWidth || "Not Specified"}
           </p>
         </div>
       </div>
@@ -8977,47 +9159,10 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   // Step 2: Media & Links state
   const [videoUrl, setVideoUrl] = useState('');
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
-  const [channelVideos] = useState([
-    {
-      id: 'vid-1',
-      title: 'Prime Villa Walkthrough Tour',
-      duration: '4:20',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=400&q=80',
-      views: '12.4K views'
-    },
-    {
-      id: 'vid-2',
-      title: 'Commercial Corporate Suite Tour',
-      duration: '3:45',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=400&q=80',
-      views: '8.9K views'
-    },
-    {
-      id: 'vid-3',
-      title: 'Scenic Plantation Tour',
-      duration: '5:12',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=400&q=80',
-      views: '15.1K views'
-    },
-    {
-      id: 'vid-4',
-      title: 'Luxury Penthouse Tour',
-      duration: '4:05',
-      url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
-      thumbnail: 'https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=400&q=80',
-      views: '10.2K views'
-    }
-  ]);
+  const [channelVideos] = useState([]);
 
   // Step 2 & Document File Uploads State
-  const [uploadedFiles, setUploadedFiles] = useState([
-    { name: 'Villa_SeaView_Terrace.jpg', size: '3.4 MB', type: 'image' },
-    { name: 'Architectural_Master_Plan.pdf', size: '8.1 MB', type: 'document' },
-    { name: 'MotherDeed_Chain_Audit.pdf', size: '12.5 MB', type: 'document' }
-  ]);
+  const [uploadedFiles, setUploadedFiles] = useState([]);
 
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -9034,14 +9179,8 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     setUploadedFiles(prev => prev.filter((_, i) => i !== idx));
   };
 
-  // Step 3: Dynamic Structural & Land Inventory State as requested:
-  // const [inventory, setInventory] = useState([{ label: 'Living Halls & Lounge', value: '2 (Formal Living + Lounge)' }]);
-  const [inventory, setInventory] = useState([
-    { label: 'Living Halls & Lounge', value: '2 (Formal Living + Lounge)' },
-    { label: 'Power Backup', value: '15KW 3-Phase + 100% Generator Backup' },
-    { label: 'Water Source', value: 'Open Well + City Corporation Supply' },
-    { label: 'Approach Road Width', value: '40ft Tar Road with Municipal Lighting' }
-  ]);
+  // Step 3: Dynamic Structural & Land Inventory State
+  const [inventory, setInventory] = useState([]);
 
   const handleAddCustomInventory = () => {
     // Provide an explicit "+ Add Custom Inventory Parameter" button: clicking it appends a new row { label: '', value: '' }
@@ -9440,31 +9579,37 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                               </span>
                             </div>
 
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
-                              {channelVideos.map(vid => (
-                                <div
-                                  key={vid.id}
-                                  onClick={() => {
-                                    setVideoUrl(vid.url);
-                                    setShowYoutubePicker(false);
-                                  }}
-                                  className="group bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-[#C59B27] hover:shadow-md cursor-pointer transition-all"
-                                >
-                                  <div className="h-24 relative overflow-hidden bg-slate-900">
-                                    <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
-                                    <span className="absolute bottom-1 right-1 bg-black/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded">
-                                      {vid.duration}
-                                    </span>
+                            {channelVideos.length === 0 ? (
+                              <p className="text-xs text-slate-500 py-3 text-center">
+                                No pre-loaded channel walkthroughs. Paste a direct YouTube link above.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3">
+                                {channelVideos.map(vid => (
+                                  <div
+                                    key={vid.id}
+                                    onClick={() => {
+                                      setVideoUrl(vid.url);
+                                      setShowYoutubePicker(false);
+                                    }}
+                                    className="group bg-white border border-slate-200 rounded-xl overflow-hidden hover:border-[#C59B27] hover:shadow-md cursor-pointer transition-all"
+                                  >
+                                    <div className="h-24 relative overflow-hidden bg-slate-900">
+                                      <img src={vid.thumbnail} alt={vid.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300" />
+                                      <span className="absolute bottom-1 right-1 bg-black/80 text-white font-mono text-[9px] px-1.5 py-0.5 rounded">
+                                        {vid.duration}
+                                      </span>
+                                    </div>
+                                    <div className="p-2.5">
+                                      <p className="text-[11px] font-semibold text-[#0F1E36] group-hover:text-[#C59B27] line-clamp-1">
+                                        {vid.title}
+                                      </p>
+                                      <span className="text-[10px] text-slate-400 block mt-0.5">Click to Select</span>
+                                    </div>
                                   </div>
-                                  <div className="p-2.5">
-                                    <p className="text-[11px] font-semibold text-[#0F1E36] group-hover:text-[#C59B27] line-clamp-1">
-                                      {vid.title}
-                                    </p>
-                                    <span className="text-[10px] text-slate-400 block mt-0.5">Click to Select</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -9953,30 +10098,90 @@ export default function Sidebar({
 ## File: `src/context/PropertyContext.jsx`
 
 ```jsx
-import React, { createContext, useContext, useState, useEffect } from 'react';
-import { mockProperties } from '../data/mockProperties';
+import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import { fetchProperties } from '../api';
 
 const PropertyContext = createContext();
 
-export function PropertyProvider({ children }) {
-  // Initialized with cached properties or robust mockProperties collection
-  const [properties, setProperties] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('grabmykey_properties');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
-        }
-      } catch (e) {
-        console.warn('Failed to parse cached properties', e);
-      }
+// Automatically purge legacy mock properties from localStorage cache
+if (typeof window !== 'undefined') {
+  try {
+    const saved = localStorage.getItem('grabmykey_properties');
+    if (saved && (
+      saved.includes('Coastal Horizon') ||
+      saved.includes('Kadri Heights') ||
+      saved.includes('Bejai Royal') ||
+      saved.includes('Ullal Sovereign') ||
+      saved.includes('dQw4w9WgXcQ')
+    )) {
+      localStorage.removeItem('grabmykey_properties');
     }
-    return mockProperties;
-  });
+  } catch (e) {
+    // Ignore storage errors
+  }
+}
+
+export function PropertyProvider({ children }) {
+  // Wipe default initial states: strictly start empty []
+  const [properties, setProperties] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState(null);
+
+  // Live Backend API Synchronization exclusively from Express
+  const loadPropertiesFromApi = useCallback(async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
+      const res = await fetchProperties();
+      if (res?.data && Array.isArray(res.data)) {
+        setProperties(res.data);
+        return res.data;
+      } else {
+        setProperties([]);
+        return [];
+      }
+    } catch (err) {
+      setError(err?.message || 'Failed to fetch properties from server');
+      console.warn('[PropertyContext] Live API fetch error:', err?.message || err);
+      setProperties([]);
+      return [];
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
+    let isMounted = true;
+    (async () => {
+      try {
+        setIsLoading(true);
+        const res = await fetchProperties();
+        if (isMounted) {
+          if (res?.data && Array.isArray(res.data)) {
+            setProperties(res.data);
+          } else {
+            setProperties([]);
+          }
+        }
+      } catch (err) {
+        console.warn('[PropertyContext] Initial mount backend fetch error:', err?.message || err);
+        if (isMounted) {
+          setProperties([]);
+        }
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined' && Array.isArray(properties)) {
       localStorage.setItem('grabmykey_properties', JSON.stringify(properties));
     }
   }, [properties]);
@@ -10023,22 +10228,19 @@ export function PropertyProvider({ children }) {
     }
   };
 
-  const resetToMockProperties = () => {
-    setProperties(mockProperties);
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('grabmykey_properties', JSON.stringify(mockProperties));
-    }
-  };
-
   return (
     <PropertyContext.Provider value={{
       properties,
       setProperties,
+      isLoading,
+      error,
+      refreshProperties: loadPropertiesFromApi,
+      reloadProperties: loadPropertiesFromApi,
+      resetToMockProperties: loadPropertiesFromApi,
       addProperty,
       updateProperty,
       deleteProperty,
-      clearAllProperties,
-      resetToMockProperties
+      clearAllProperties
     }}>
       {children}
     </PropertyContext.Provider>
@@ -10049,445 +10251,23 @@ export const useProperties = () => {
   const context = useContext(PropertyContext);
   if (!context) {
     return {
-      properties: mockProperties,
+      properties: [],
       setProperties: () => {},
+      isLoading: false,
+      error: null,
+      refreshProperties: async () => [],
+      reloadProperties: async () => [],
+      resetToMockProperties: async () => [],
       addProperty: () => {},
       updateProperty: () => {},
       deleteProperty: () => {},
-      clearAllProperties: () => {},
-      resetToMockProperties: () => {}
+      clearAllProperties: () => {}
     };
   }
   return context;
 };
 
 export default PropertyContext;
-
-
-```
-
-## File: `src/data/mockProperties.js`
-
-```javascript
-/**
- * GrabMyKey - Verified Mock Properties Collection
- * Scope: Exclusively Mangaluru, Karnataka
- */
-
-export const mockProperties = [
-  {
-    id: "gmk-001",
-    _id: "gmk-001",
-    slug: "the-coastal-horizon-sea-villa",
-    title: "The Coastal Horizon Sea Villa",
-    type: "Villa",
-    category: "Villa",
-    dealType: "Resale",
-    price: "₹3.85 Cr",
-    priceRaw: 38500000,
-    priceText: "3.85 Cr",
-    pricePerSqFt: "₹9,167 / sq.ft",
-    location: "Surathkal Beach, Mangaluru",
-    locality: "Surathkal Beach",
-    city: "Mangaluru",
-    bedrooms: 4,
-    bathrooms: 5,
-    superArea: "4,200 sq.ft",
-    area: "4,200 sq.ft",
-    furnishing: "Fully Furnished",
-    description: "Ultra-luxury cliffside residence with private infinity pool overlooking the Arabian Sea. Features teakwood interiors, automated smart-home systems, and private beach access path.",
-    highlights: [
-      "Direct Cliffside Ocean View",
-      "Private Heated Infinity Pool",
-      "Automated Smart Home Controls",
-      "Italian Marble & Teakwood Interiors"
-    ],
-    features: [
-      { name: "Direct Beachfront Access (Surathkal)", available: true },
-      { name: "Private Infinity Pool & Deck", available: true },
-      { name: "Full Solar Power Backup & Borewell", available: true },
-      { name: "Clear 30-Year Single Owner Title", available: true }
-    ],
-    specs: {
-      bedrooms: 4,
-      bathrooms: 5,
-      carpetAreaSqFt: 4200,
-      furnishingStatus: "Fully Furnished",
-      floorLevel: "G+2",
-      totalFloors: "3"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600607687939-ce8a6c25118c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1613490493576-7fde63acd811?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 38500000,
-      isNegotiable: false,
-      maintenanceFee: 12000
-    },
-    badge: "Featured Listing",
-    specifications: [
-      { category: "Build & Materials", feature: "Flooring Type", status: "Included", details: "Imported Italian Marble (Living) + Teak Hardwood (Bedrooms)" },
-      { category: "Build & Materials", feature: "Wood & Joinery", status: "Included", details: "100% Seasoned Burma Teakwood (Doors, Frames & Windows)" },
-      { category: "Build & Materials", feature: "Wall Finish & Paint", status: "Included", details: "ROYAL Silk Emulsion + Texture Accent Walls" },
-      { category: "Build & Materials", feature: "Structural Frame", status: "Included", details: "Earthquake Resistant RCC Framed Structure (M25 Grade)" },
-      { category: "Build & Materials", feature: "Roofing & Insulation", status: "Included", details: "Sloped Concrete Slab with Terracotta Tiles & Heat Shield Insulation" },
-      { category: "Build & Materials", feature: "Sanitaryware & Fittings", status: "Included", details: "Kohler / Grohe Concealed Diverters & Wall-Hung Closets" },
-      { category: "Interior & Living", feature: "Modular Kitchen", status: "Included", details: "Faber Chimney, Blum Soft-Close Hardware & Quartz Island" },
-      { category: "Interior & Living", feature: "Air Conditioning", status: "Included", details: "Daikin VRV Centralized Inverter Climate Control" }
-    ]
-  },
-  {
-    id: "gmk-002",
-    _id: "gmk-002",
-    slug: "kadri-heights-commercial-suite",
-    title: "Kadri Heights Commercial Suite",
-    type: "Commercial",
-    category: "Commercial",
-    dealType: "New Launch",
-    price: "₹1.40 Cr",
-    priceRaw: 14000000,
-    priceText: "1.40 Cr",
-    pricePerSqFt: "₹7,568 / sq.ft",
-    location: "Kadri Hills, Mangaluru",
-    locality: "Kadri Hills",
-    city: "Mangaluru",
-    bedrooms: 0,
-    bathrooms: 2,
-    superArea: "1,850 sq.ft",
-    area: "1,850 sq.ft",
-    furnishing: "Semi-Furnished",
-    description: "Grade-A corporate suite in Kadri's financial district. High rental yield potential for tech companies, wealth management firms, or MNC regional offices.",
-    highlights: [
-      "Prime Commercial Main Road Facing",
-      "100% Power Back-Up Sanctioned",
-      "Reserved Underground Parking (2 Slots)",
-      "Grade-A Glass Facade Building"
-    ],
-    features: [
-      { name: "Centrally Air Conditioned Shell", available: true },
-      { name: "High Speed Elevators (3 Passenger + 1 Service)", available: true },
-      { name: "24/7 Security & CCTV Surveillance", available: true },
-      { name: "Designated Basement Parking Slots (2)", available: true }
-    ],
-    specs: {
-      bedrooms: 0,
-      bathrooms: 2,
-      carpetAreaSqFt: 1850,
-      furnishingStatus: "Semi-Furnished",
-      floorLevel: "4th Floor",
-      totalFloors: "12"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1497366216548-37526070297c?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1497366811353-6870744d04b2?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 14000000,
-      isNegotiable: false,
-      maintenanceFee: 8500
-    },
-    badge: "Commercial Asset",
-    specifications: [
-      { category: "Structure", feature: "Floor Plate & Ceiling", status: "Included", details: "Clear 12ft ceiling height with open column grid" },
-      { category: "Utilities & Safety", feature: "Commercial Power Load", status: "Included", details: "30kW sanctioned commercial power connection" },
-      { category: "Utilities & Safety", feature: "Fire Fighting Infrastructure", status: "Included", details: "NOC approved sprinklers, smoke detectors & hose reels" },
-      { category: "Access & Loading", feature: "Service Lift & Bay", status: "Included", details: "Dedicated freight elevator & rear loading bay" }
-    ]
-  },
-  {
-    id: "gmk-003",
-    _id: "gmk-003",
-    slug: "bejai-royal-residency-penthouse",
-    title: "Bejai Royal Residency Penthouse",
-    type: "Apartment",
-    category: "Apartment",
-    dealType: "Resale",
-    price: "₹2.20 Cr",
-    priceRaw: 22000000,
-    priceText: "2.20 Cr",
-    pricePerSqFt: "₹7,719 / sq.ft",
-    location: "Bejai, Mangaluru",
-    locality: "Bejai",
-    city: "Mangaluru",
-    bedrooms: 3,
-    bathrooms: 4,
-    superArea: "2,850 sq.ft",
-    area: "2,850 sq.ft",
-    furnishing: "Semi-Furnished",
-    description: "Top-floor luxury penthouse with panoramic city views, private landscaped rooftop deck, low-density living, and premium clubhouse amenities.",
-    highlights: [
-      "Private Rooftop Terrace (800 sq.ft)",
-      "Clubhouse, Gym & Swimming Pool Access",
-      "2 Covered Car Parking Bays",
-      "MUDA Approved & Clear Title"
-    ],
-    features: [
-      { name: "Private Terrace Garden Deck", available: true },
-      { name: "2 Covered Dedicated Parking Slots", available: true },
-      { name: "100% Generator Backup", available: true },
-      { name: "MUDA Approved Single Owner Title", available: true }
-    ],
-    specs: {
-      bedrooms: 3,
-      bathrooms: 4,
-      carpetAreaSqFt: 2850,
-      furnishingStatus: "Semi-Furnished",
-      floorLevel: "14th Floor (Top)",
-      totalFloors: "14"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1512917774080-9991f1c4c750?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154526-990dced4db0d?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 22000000,
-      isNegotiable: true,
-      maintenanceFee: 9000
-    },
-    badge: "Exclusive Listing",
-    specifications: [
-      { category: "Build & Materials", feature: "Flooring Type", status: "Included", details: "Vitrified Nano Tiles + Wooden Flooring in Master Bedroom" },
-      { category: "Build & Materials", feature: "Sanitaryware & Fittings", status: "Included", details: "Grohe Concealed Fittings & Duravit Fixtures" },
-      { category: "Interior & Living", feature: "Modular Kitchen", status: "Included", details: "Hafele Hardware with Granite Countertops" },
-      { category: "Utilities & Safety", feature: "Power Backup", status: "Included", details: "100% Generator Backup for all Apartments & Elevators" }
-    ]
-  },
-  {
-    id: "gmk-004",
-    _id: "gmk-004",
-    slug: "ullal-sovereign-beach-plot",
-    title: "Ullal Sovereign Beach Plot",
-    type: "Plot",
-    category: "Plot",
-    dealType: "Direct Sale",
-    price: "₹1.45 Cr",
-    priceRaw: 14500000,
-    priceText: "1.45 Cr",
-    pricePerSqFt: "₹2,219 / sq.ft",
-    location: "Ullal Beach Road, Mangaluru",
-    locality: "Ullal Beach Road",
-    city: "Mangaluru",
-    plotArea: "15 Cents (6,534 sq.ft)",
-    superArea: "15 Cents",
-    area: "15 Cents",
-    boundary: "Complete Laterite Compound Wall",
-    zoning: "Residential Conversion (Single Patta)",
-    roadWidth: "40ft Wide Asphalt Road Frontage",
-    bedrooms: 0,
-    bathrooms: 0,
-    furnishing: "Unfurnished",
-    description: "Prime 15-cent freehold beachfront plot located just 250m from the coastline. Complete laterite boundary wall, clear single-owner title, and sweet groundwater table.",
-    highlights: [
-      "15 Cents Clear Residential Land",
-      "250m Walking Distance to Beachfront",
-      "40ft Wide Asphalt Road Frontage",
-      "Direct Owner Transaction"
-    ],
-    features: [
-      { name: "40ft Wide Asphalt Road Frontage", available: true },
-      { name: "Complete Laterite Stone Boundary Wall", available: true },
-      { name: "CRZ Clearance & Single Patta Title", available: true },
-      { name: "Sweet Water Ground Level 12ft", available: true }
-    ],
-    specs: {
-      bedrooms: 0,
-      bathrooms: 0,
-      carpetAreaSqFt: 6534,
-      furnishingStatus: "Unfurnished",
-      floorLevel: "Ground",
-      totalFloors: "Ground"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 14500000,
-      isNegotiable: true,
-      maintenanceFee: 0
-    },
-    badge: "Prime Land",
-    specifications: [
-      { category: "Site & Enclosure", feature: "Plot Area", status: "Included", details: "15 Cents (6,534 sq.ft) regular rectangular layout" },
-      { category: "Site & Enclosure", feature: "Boundary & Compound", status: "Included", details: "6ft height Laterite stone wall on all 4 sides with iron gate" },
-      { category: "Access & Zoning", feature: "Road Access", status: "Included", details: "40ft asphalt municipal road with clear approach" },
-      { category: "Access & Zoning", feature: "Zoning & Approvals", status: "Included", details: "Clear Residential Conversion, Single Patta Title, Non-Agricultural" }
-    ]
-  },
-  {
-    id: "gmk-005",
-    _id: "gmk-005",
-    slug: "kavoor-prime-commercial-plot",
-    title: "Kavoor Prime Commercial Plot",
-    type: "Plot",
-    category: "Plot",
-    dealType: "Direct Sale",
-    price: "₹2.80 Cr",
-    priceRaw: 28000000,
-    priceText: "2.80 Cr",
-    pricePerSqFt: "₹2,571 / sq.ft",
-    location: "Kavoor Junction, Mangaluru",
-    locality: "Kavoor Junction",
-    city: "Mangaluru",
-    plotArea: "25 Cents (10,890 sq.ft)",
-    superArea: "25 Cents",
-    area: "25 Cents",
-    boundary: "Barbed Wire & Stone Pillar Fencing",
-    zoning: "Commercial Highway Conversion",
-    roadWidth: "60ft Airport Road Frontage",
-    bedrooms: 0,
-    bathrooms: 0,
-    furnishing: "Unfurnished",
-    description: "Strategic commercial plot on the Mangaluru International Airport highway corridor. High FAR zone with clear 60ft frontage, ideal for hotels, hospitals, or commercial complexes.",
-    highlights: [
-      "25 Cents Commercial Highway Plot",
-      "Direct Route to Mangaluru International Airport",
-      "High Floor Area Ratio (FAR) Zone",
-      "100% Clean Ownership History"
-    ],
-    features: [
-      { name: "60ft Airport Road Main Frontage", available: true },
-      { name: "Commercial Land Use Conversion Completed", available: true },
-      { name: "High FAR (Floor Area Ratio) Zone", available: true },
-      { name: "All Civic Infrastructure in Place", available: true }
-    ],
-    specs: {
-      bedrooms: 0,
-      bathrooms: 0,
-      carpetAreaSqFt: 10890,
-      furnishingStatus: "Unfurnished",
-      floorLevel: "Ground",
-      totalFloors: "Ground"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1500382017468-9049fed747ef?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1500530855697-b586d89ba3ee?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 28000000,
-      isNegotiable: false,
-      maintenanceFee: 0
-    },
-    badge: "Commercial Land",
-    specifications: [
-      { category: "Site & Enclosure", feature: "Plot Area", status: "Included", details: "25 Cents (10,890 sq.ft) wide highway frontage parcel" },
-      { category: "Access & Zoning", feature: "Road Frontage", status: "Included", details: "60ft wide Airport Road main road facing" },
-      { category: "Access & Zoning", feature: "Zoning & Approvals", status: "Included", details: "Commercial Conversion, MUDA Comprehensive Development Plan Zone" }
-    ]
-  },
-  {
-    id: "gmk-006",
-    _id: "gmk-006",
-    slug: "moodbidri-heritage-plantation-estate",
-    title: "Moodbidri Heritage Plantation Estate",
-    type: "Villa",
-    category: "Estate",
-    dealType: "Resale",
-    price: "₹3.25 Cr",
-    priceRaw: 32500000,
-    priceText: "3.25 Cr",
-    pricePerSqFt: "₹8,552 / sq.ft",
-    location: "Moodbidri Outskirts, Mangaluru",
-    locality: "Moodbidri Outskirts",
-    city: "Mangaluru",
-    bedrooms: 5,
-    bathrooms: 4,
-    superArea: "3,800 sq.ft",
-    area: "3.5 Acres",
-    furnishing: "Furnished",
-    description: "Traditional Mangalorean courtyard estate nestled within 3.5 acres of active coconut and spice groves. Features natural perennial spring, teakwood architecture, and complete boundary fencing.",
-    highlights: [
-      "3.5 Acre Active Coconut & Spice Grove",
-      "Private Perennial Sweet Water Well",
-      "Teak & Rosewood Heritage Residence",
-      "Resort Conversion Potential"
-    ],
-    features: [
-      { name: "3.5 Acres Fenced Plantation", available: true },
-      { name: "Heritage Courtyard Architecture", available: true },
-      { name: "Perennial Natural Spring & Drip Irrigation", available: true },
-      { name: "Servant Quarters & Dedicated Storage Sheds", available: true }
-    ],
-    specs: {
-      bedrooms: 5,
-      bathrooms: 4,
-      carpetAreaSqFt: 3800,
-      furnishingStatus: "Furnished",
-      floorLevel: "G+1",
-      totalFloors: "2"
-    },
-    images: [
-      "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80"
-    ],
-    galleryImages: [
-      "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1518780664697-55e3ad937233?auto=format&fit=crop&w=1600&q=80",
-      "https://images.unsplash.com/photo-1600585154340-be6161a56a0c?auto=format&fit=crop&w=1600&q=80"
-    ],
-    youtubeVideoId: "dQw4w9WgXcQ",
-    videoUrl: "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
-    thumbnail: "https://images.unsplash.com/photo-1580587771525-78b9dba3b914?auto=format&fit=crop&w=1600&q=80",
-    pricing: {
-      expectedPrice: 32500000,
-      isNegotiable: true,
-      maintenanceFee: 5000
-    },
-    badge: "Heritage Estate",
-    specifications: [
-      { category: "Build & Materials", feature: "Wood & Joinery", status: "Included", details: "Heritage Seasoned Teak & Rosewood Pillars and Beams" },
-      { category: "Build & Materials", feature: "Roofing", status: "Included", details: "Traditional Mangalore Terracotta Clay Tiles with Wood Truss" },
-      { category: "Site & Enclosure", feature: "Land Parcel", status: "Included", details: "3.5 Acres Freehold Agri/Plantation with Drip Irrigation" }
-    ]
-  }
-];
-
-export default mockProperties;
 
 
 ```
@@ -10978,12 +10758,11 @@ export default function Contact() {
 ## File: `src/pages/Home.jsx`
 
 ```jsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Search, ChevronDown, Play, ArrowUpRight } from 'lucide-react';
+import { Search, ChevronDown, Play, ArrowUpRight, Building2 } from 'lucide-react';
 import { useProperties } from '../context/PropertyContext';
 import PropertyCard from '../components/PropertyCard';
-import { mockProperties } from '../data/mockProperties';
 
 export default function Home({
   searchQuery: externalSearchQuery,
@@ -10992,27 +10771,48 @@ export default function Home({
   setSelectedRegion: externalSetSelectedRegion,
   onBrowseAll,
   property = null,
-  properties: externalProperties,
+  properties: externalProperties = [],
   showGrid = true
 } = {}) {
   const navigate = useNavigate();
-  const { properties: contextProperties } = useProperties();
-  const properties = externalProperties !== undefined ? externalProperties : contextProperties;
+  const { properties: contextProperties = [], isLoading } = useProperties();
   
+  // Wipe default initial states: strictly start empty [] and null
+  const [properties, setProperties] = useState([]);
+  const [featuredProperty, setFeaturedProperty] = useState(null);
   const [isPlaying, setIsPlaying] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [localRegion, setLocalRegion] = useState('All');
+
+  // Synchronize with external or context properties
+  useEffect(() => {
+    const list = Array.isArray(externalProperties) && externalProperties.length > 0
+      ? externalProperties
+      : (Array.isArray(contextProperties) ? contextProperties : []);
+    setProperties(list);
+  }, [externalProperties, contextProperties]);
+
+  useEffect(() => {
+    if (property) {
+      setFeaturedProperty(property);
+    } else if (properties.length > 0) {
+      setFeaturedProperty(properties[0]);
+    } else {
+      setFeaturedProperty(null);
+    }
+  }, [property, properties]);
   
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearch;
   const setSearchQuery = externalSetSearchQuery || setLocalSearch;
   const selectedRegion = externalSelectedRegion !== undefined ? externalSelectedRegion : localRegion;
   const setSelectedRegion = externalSetSelectedRegion || setLocalRegion;
 
-  // Safe Fallback Dataset
-  const activeListings = (properties && properties.length > 0) ? properties : mockProperties;
-  const featured = property || activeListings[0];
+  // Live Backend Listings (Strictly empty array if no live records)
+  const activeListings = Array.isArray(properties) ? properties : [];
+  const featured = featuredProperty;
 
   const activeVideoUrl = featured?.videoUrl || (featured?.youtubeVideoId ? `https://www.youtube.com/embed/${featured.youtubeVideoId}?autoplay=1` : null);
+  const featuredPoster = featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -11036,47 +10836,47 @@ export default function Home({
   };
 
   return (
-    <div className="space-y-12 pb-12">
-      {/* 1. PIXEL-PERFECT HERO SECTION */}
-      <section className="w-full pt-2 pb-4">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-start">
+    <div className="space-y-12 pb-12 w-full">
+      {/* 1. HERO SECTION */}
+      <section className="w-full max-w-[1440px] mx-auto px-6 sm:px-8 lg:px-10 pt-12 sm:pt-16 pb-12">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12 items-center">
           
-          {/* Left Column: Heading & Search */}
-          <div className="lg:col-span-7 space-y-5 pt-0">
-            {/* Primary Headline - 3 Line Serif */}
+          {/* Left Column: Heading, Subtext, Search & Trust Badges */}
+          <div className="lg:col-span-6 space-y-6">
+            {/* Main Heading (<h1> - Refined Semi-Bold Weight & Contrast) */}
             <h1 
-              className="text-4xl sm:text-5xl lg:text-[54px] font-bold text-[#0F172A] tracking-tight leading-[1.12]"
+              className="text-4xl sm:text-5xl lg:text-[54px] font-semibold text-[#0F172A] tracking-tight leading-[1.12]"
               style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
             >
               Transparent Property<br />
               Walkthroughs for<br />
-              <span className="text-[#C59B27]">Prime Estates.</span>
+              <span className="text-[#C59B27] font-semibold">Prime Estates.</span>
             </h1>
 
-            {/* Subtitle */}
-            <p className="text-xs sm:text-sm text-slate-500 font-sans max-w-md leading-relaxed">
+            {/* Body Subtext (<p>) */}
+            <p className="text-base sm:text-lg text-slate-600 font-medium font-sans max-w-lg leading-relaxed">
               GrabMyKey connects serious buyers, NRI investors, and verified property owners directly across Mangaluru—backed by unedited video walkthroughs and direct title audits.
             </p>
 
-            {/* Search Input Bar */}
-            <div className="pt-2 max-w-lg space-y-4">
-              <form onSubmit={handleSearchSubmit} className="p-1.5 rounded-2xl bg-white border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center gap-2">
-                <div className="flex items-center gap-2.5 flex-1 px-3 w-full">
-                  <Search className="w-4 h-4 text-slate-400 shrink-0"/>
+            {/* Search Container & Trust Badges */}
+            <div className="pt-2 max-w-xl space-y-4">
+              <form onSubmit={handleSearchSubmit} className="p-2 rounded-2xl bg-white border border-slate-200 shadow-sm flex flex-col sm:flex-row items-center gap-2">
+                <div className="flex items-center gap-3 flex-1 px-3 w-full">
+                  <Search className="w-5 h-5 text-slate-400 shrink-0"/>
                   <input 
                     type="text"
                     placeholder="Locality, city, or property..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full py-2 text-xs text-slate-800 placeholder-slate-400 bg-transparent outline-none font-sans"
+                    className="w-full py-2.5 text-sm text-slate-800 placeholder-slate-400 bg-transparent outline-none font-sans"
                   />
                 </div>
                 
-                <div className="relative shrink-0 border-t sm:border-t-0 sm:border-l border-slate-200/60">
+                <div className="relative shrink-0 border-t sm:border-t-0 sm:border-l border-slate-200">
                   <select
                     value={selectedRegion}
                     onChange={(e) => setSelectedRegion(e.target.value)}
-                    className="appearance-none bg-transparent pl-3 pr-7 py-2 text-xs font-semibold text-slate-600 hover:text-slate-900 font-sans flex items-center gap-1 outline-none cursor-pointer"
+                    className="appearance-none bg-transparent pl-3 pr-8 py-2.5 text-xs font-semibold text-slate-600 hover:text-slate-900 font-sans flex items-center gap-1 outline-none cursor-pointer"
                   >
                     <option value="All">All Regions</option>
                     <option value="Kadri">Kadri</option>
@@ -11085,20 +10885,20 @@ export default function Home({
                     <option value="Kottara">Kottara</option>
                     <option value="Ullal">Ullal</option>
                   </select>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none"/>
+                  <ChevronDown className="w-3.5 h-3.5 text-slate-400 absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none"/>
                 </div>
 
                 <button 
                   type="button"
                   onClick={handleBrowseClick}
-                  className="w-full sm:w-auto px-5 py-2.5 rounded-xl bg-[#0F172A] hover:bg-[#C59B27] text-white transition-colors text-xs font-bold font-sans tracking-wider shrink-0 cursor-pointer"
+                  className="w-full sm:w-auto px-6 py-3 rounded-xl bg-[#0F172A] hover:bg-[#C59B27] text-white transition-colors text-xs font-bold font-sans tracking-wider shrink-0 cursor-pointer shadow-sm"
                 >
                   BROWSE ALL
                 </button>
               </form>
 
-              {/* Text-Only Indicators */}
-              <div className="flex items-center gap-6 text-[11px] font-medium text-slate-600 font-sans pt-1">
+              {/* Trust Badges */}
+              <div className="flex items-center gap-6 text-xs font-bold text-slate-600 font-sans pt-1">
                 <span>100% Title Audited</span>
                 <span>Walkthrough Tours</span>
                 <span>Direct Zero-Spam Deals</span>
@@ -11106,9 +10906,9 @@ export default function Home({
             </div>
           </div>
 
-          {/* Right Column: Video Tour Player Card */}
-          <div className="lg:col-span-5">
-            <div className="relative rounded-3xl overflow-hidden bg-slate-900 border border-slate-800/80 shadow-xl h-[370px] lg:h-[390px] flex flex-col justify-between p-5 select-none group">
+          {/* Right Column: Hero Video Card (lg:col-span-6) */}
+          <div className="lg:col-span-6">
+            <div className="relative rounded-3xl overflow-hidden bg-slate-900 border border-slate-800 shadow-2xl aspect-[16/10] sm:aspect-[16/9] lg:aspect-[16/10] min-h-[360px] flex flex-col justify-between p-6 select-none group w-full">
               {isPlaying && activeVideoUrl ? (
                 <iframe
                   src={activeVideoUrl}
@@ -11121,50 +10921,62 @@ export default function Home({
                 <>
                   {/* Top Floating Pill Badges */}
                   <div className="flex items-center justify-between z-10">
-                    <span className="px-3.5 py-1 rounded-full bg-slate-950/70 backdrop-blur-md text-[10px] font-medium text-white tracking-wide border border-white/10">
+                    <span className="px-3.5 py-1.5 rounded-full bg-slate-950/80 backdrop-blur-md text-[10px] font-bold text-white tracking-wider border border-white/10 uppercase">
                       Featured Video Tour
                     </span>
-                    <span className="px-3.5 py-1 rounded-full bg-white text-[10px] font-bold text-slate-900 uppercase tracking-widest shadow-xs">
-                      EXCLUSIVE LISTING
+                    <span className="px-3.5 py-1.5 rounded-full bg-white text-[10px] font-bold text-slate-900 uppercase tracking-widest shadow-sm">
+                      {featured ? 'EXCLUSIVE LISTING' : 'MANGALURU, KA'}
                     </span>
                   </div>
 
-                  {/* Center Play Control */}
-                  <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
-                    <div 
-                      onClick={() => {
-                        if (activeVideoUrl) setIsPlaying(true);
-                      }}
-                      className={`w-12 h-12 rounded-full bg-slate-950/80 border border-white/20 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform ${activeVideoUrl ? 'cursor-pointer pointer-events-auto' : ''}`}
-                    >
-                      <Play className="w-5 h-5 fill-white ml-0.5"/>
+                  {/* Center Play Control Button */}
+                  {activeVideoUrl && (
+                    <div className="absolute inset-0 flex items-center justify-center z-10 pointer-events-none">
+                      <div 
+                        onClick={() => setIsPlaying(true)}
+                        className="w-16 h-16 rounded-full bg-slate-950/80 border border-white/20 text-white flex items-center justify-center shadow-2xl group-hover:scale-110 transition-transform cursor-pointer pointer-events-auto"
+                      >
+                        <Play className="w-6 h-6 fill-white ml-0.5"/>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
-                  {/* Video Cover Image */}
-                  <img 
-                    src={featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || "https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1600&q=80"} 
-                    alt="Featured Property Walkthrough"
-                    className="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-700"
-                  />
+                  {/* Video Background Cover & Dark Overlay */}
+                  {featuredPoster ? (
+                    <img 
+                      src={featuredPoster} 
+                      alt={featured?.title || "Featured Property Walkthrough"}
+                      className="absolute inset-0 w-full h-full object-cover opacity-65 group-hover:scale-105 transition-transform duration-700"
+                    />
+                  ) : (
+                    <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black opacity-90" />
+                  )}
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/90 via-slate-950/20 to-slate-950/40 pointer-events-none" />
 
-                  {/* Bottom Information Box Overlay */}
-                  <div className="z-10 p-3.5 rounded-2xl bg-[#0F172A]/90 backdrop-blur-md border border-white/10 flex items-center justify-between shadow-lg">
-                    <div className="space-y-0.5">
-                      <h3 className="text-xs sm:text-sm font-bold text-white font-serif" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                        {featured?.title || "The Coastal Horizon Sea Villa"}
+                  {/* Bottom Sleek Floating Metadata Bar */}
+                  <div className="z-10 p-4 rounded-2xl bg-slate-950/85 backdrop-blur-md border border-white/10 flex items-center justify-between shadow-lg">
+                    <div className="space-y-0.5 min-w-0 pr-3">
+                      <h3 className="text-sm sm:text-base font-bold text-white font-serif truncate" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                        {featured ? featured.title : "No Featured Video Tour"}
                       </h3>
-                      <p className="text-[11px] text-slate-300 font-sans">
-                        {featured?.location || "Surathkal Beach, Mangaluru"} <span className="text-white font-semibold ml-1">• {featured?.price || (featured?.priceText ? `₹${featured.priceText}` : "₹3.85 Cr")}</span>
+                      <p className="text-xs text-slate-300 font-sans truncate">
+                        {featured ? (
+                          <>
+                            {featured.location || (featured.locality ? `${featured.locality}, ${featured.city || 'Mangaluru'}` : 'Mangaluru')}
+                            {featured.price ? <span className="text-white font-semibold ml-1">• {featured.price}</span> : (featured.priceText ? <span className="text-white font-semibold ml-1">• ₹{featured.priceText}</span> : '')}
+                          </>
+                        ) : (
+                          "Add listings via Admin Console to feature on-site walkthroughs"
+                        )}
                       </p>
                     </div>
 
                     <Link 
                       to={featured?.slug ? `/property/${featured.slug}` : '/properties'} 
-                      className="w-7 h-7 rounded-full bg-white/10 flex items-center justify-center text-white shrink-0 group-hover:bg-[#C59B27] transition-colors cursor-pointer"
+                      className="w-9 h-9 rounded-full bg-white/10 hover:bg-white hover:text-slate-900 flex items-center justify-center text-white shrink-0 group-hover:bg-[#C59B27] group-hover:text-slate-950 transition-all duration-200 cursor-pointer"
                       title="View Property"
                     >
-                      <ArrowUpRight className="w-3.5 h-3.5"/>
+                      <ArrowUpRight className="w-4 h-4"/>
                     </Link>
                   </div>
                 </>
@@ -11177,7 +10989,7 @@ export default function Home({
 
       {/* 2. FEATURED PROPERTIES GRID SECTION */}
       {showGrid && (
-        <section className="space-y-6 pt-2">
+        <section className="w-full max-w-[1440px] mx-auto px-6 sm:px-8 lg:px-10 space-y-6 pt-4 pb-8">
           <div className="flex items-end justify-between border-b border-slate-200/60 pb-4">
             <div className="space-y-1">
               <span className="text-[10px] font-bold text-[#C59B27] uppercase tracking-widest font-sans block">
@@ -11196,11 +11008,51 @@ export default function Home({
             </Link>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-            {activeListings.slice(0, 4).map((property) => (
-              <PropertyCard key={property.id || property._id || property.slug} property={property} />
-            ))}
-          </div>
+          {isLoading && activeListings.length === 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[1, 2, 3, 4].map((n) => (
+                <div key={n} className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden animate-pulse flex flex-col justify-between shadow-xs">
+                  <div className="h-56 bg-slate-100" />
+                  <div className="p-6 space-y-3">
+                    <div className="h-3 bg-slate-200 rounded w-1/3" />
+                    <div className="h-5 bg-slate-200 rounded w-3/4" />
+                    <div className="h-3 bg-slate-100 rounded w-full" />
+                  </div>
+                  <div className="px-6 pb-6 pt-4 border-t border-slate-100 flex justify-between items-center">
+                    <div className="h-5 bg-slate-200 rounded w-20" />
+                    <div className="h-4 bg-slate-100 rounded w-16" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : activeListings.length > 0 ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {activeListings.slice(0, 4).map((property) => (
+                <PropertyCard key={property.id || property._id || property.slug} property={property} />
+              ))}
+            </div>
+          ) : (
+            <div className="py-14 px-6 rounded-3xl bg-white border border-slate-200/80 text-center space-y-3 shadow-xs">
+              <div className="w-12 h-12 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 flex items-center justify-center mx-auto text-[#C59B27]">
+                <Building2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-xl font-serif font-bold text-[#0F172A]" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+                No Properties Listed Yet
+              </h3>
+              <p className="text-xs text-slate-500 font-sans max-w-md mx-auto leading-relaxed">
+                No properties listed yet. Add a listing from admin panel.
+              </p>
+              <div className="pt-2">
+                <Link
+                  to="/manage-345"
+                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F172A] hover:bg-[#C59B27] text-white rounded-xl text-xs font-semibold transition-colors font-sans shadow-sm"
+                >
+                  <span>Open Admin Panel</span>
+                  <ArrowUpRight className="w-3.5 h-3.5" />
+                </Link>
+              </div>
+            </div>
+          )}
         </section>
       )}
     </div>
@@ -11389,9 +11241,7 @@ export default function ListProperty() {
     const cleanPrice = formData.expectedPrice ? (formData.expectedPrice.startsWith('₹') ? formData.expectedPrice : `₹${formData.expectedPrice}`) : 'Price on Request';
     const cleanLocation = formData.locality ? `${formData.locality}, Mangaluru` : 'Mangaluru';
     const cleanTitle = `${formData.locality || 'Mangaluru'} ${formData.assetCategory || 'Residence'}`;
-    const cleanImages = images.length > 0 ? images.map(img => img.url) : [
-      'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80'
-    ];
+    const cleanImages = images.length > 0 ? images.map(img => img.url) : [];
 
     addProperty({
       title: cleanTitle,
@@ -11819,15 +11669,22 @@ export default function Properties({
                 onClick={() => navigate(`/property/${prop.slug || prop._id || prop.id}`)} 
                 className="cursor-pointer"
               >
-                <div className="relative h-56 overflow-hidden bg-slate-100">
-                  <img 
-                    src={prop.images?.[0] || prop.galleryImages?.[0] || 'https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?auto=format&fit=crop&w=1200&q=80'} 
-                    alt={prop.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
+                <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
+                  {(prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
+                    <img 
+                      src={prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
+                      alt={prop.title || 'Property'}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    />
+                  ) : (
+                    <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400">
+                      <Building2 className="w-8 h-8 stroke-[1.5] mb-1" />
+                      <span className="text-[10px] font-sans font-medium uppercase tracking-wider">No Image</span>
+                    </div>
+                  )}
                   <div className="absolute top-3 left-3">
                     <span className="bg-white/95 text-slate-900 text-[10px] uppercase font-bold tracking-wider px-2.5 py-1 rounded-full border border-slate-200/80 shadow-2xs font-sans">
-                      {prop.badge || prop.type || prop.category || 'Prime Listing'}
+                      {prop.badge || prop.type || prop.category || 'Exclusive Listing'}
                     </span>
                   </div>
                 </div>
@@ -11843,9 +11700,11 @@ export default function Properties({
                   >
                     {prop.title}
                   </h3>
-                  <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
-                    {prop.description || 'Verified property listing ready for on-site inspection.'}
-                  </p>
+                  {prop.description && (
+                    <p className="text-xs text-slate-600 line-clamp-2 mb-4 leading-relaxed font-sans">
+                      {prop.description}
+                    </p>
+                  )}
                 </div>
               </div>
 
