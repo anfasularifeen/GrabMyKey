@@ -6,16 +6,8 @@ const PropertyContext = createContext();
 // Automatically purge legacy mock properties from localStorage cache
 if (typeof window !== 'undefined') {
   try {
-    const saved = localStorage.getItem('grabmykey_properties');
-    if (saved && (
-      saved.includes('Coastal Horizon') ||
-      saved.includes('Kadri Heights') ||
-      saved.includes('Bejai Royal') ||
-      saved.includes('Ullal Sovereign') ||
-      saved.includes('dQw4w9WgXcQ')
-    )) {
-      localStorage.removeItem('grabmykey_properties');
-    }
+    localStorage.removeItem('grabmykey_properties');
+    localStorage.removeItem('grabmykey_hero_settings');
   } catch (e) {
     // Ignore storage errors
   }
@@ -80,11 +72,6 @@ export function PropertyProvider({ children }) {
     };
   }, []);
 
-  useEffect(() => {
-    if (typeof window !== 'undefined' && Array.isArray(properties)) {
-      localStorage.setItem('grabmykey_properties', JSON.stringify(properties));
-    }
-  }, [properties]);
 
   const addProperty = (newProperty) => {
     const timestamp = Date.now();

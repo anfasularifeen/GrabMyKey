@@ -170,22 +170,12 @@ export default function App() {
   const [adminPinError, setAdminPinError] = useState(false);
 
   // Dynamic Site Settings (Hero Featured Video & Content)
-  const [heroSettings, setHeroSettings] = useState(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('grabmykey_hero_settings');
-        if (cached) return JSON.parse(cached);
-      } catch (e) {
-        console.warn('Failed to parse cached hero settings', e);
-      }
-    }
-    return {
-      heroFeaturedPropertyId: null,
-      heroCustomYoutubeId: "",
-      heroBadgeTag: "FEATURED VIDEO TOUR",
-      heroOverlayTitle: "",
-      heroOverlayLocation: ""
-    };
+  const [heroSettings, setHeroSettings] = useState({
+    heroFeaturedPropertyId: null,
+    heroCustomYoutubeId: "",
+    heroBadgeTag: "FEATURED VIDEO TOUR",
+    heroOverlayTitle: "",
+    heroOverlayLocation: ""
   });
 
   // Inbound seller requests (initialized to empty array)
@@ -211,9 +201,6 @@ export default function App() {
       const settingsRes = await fetchSiteSettings();
       if (settingsRes?.success && settingsRes.data) {
         setHeroSettings(settingsRes.data);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('grabmykey_hero_settings', JSON.stringify(settingsRes.data));
-        }
       }
     } catch (err) {
       // Gracefully handled offline fallback
@@ -296,16 +283,23 @@ export default function App() {
         fetchSiteSettings().then(res => {
           if (res?.success && res.data) {
             setHeroSettings(res.data);
-            localStorage.setItem('grabmykey_hero_settings', JSON.stringify(res.data));
           }
         }).catch(() => {});
       }
     };
     window.addEventListener('grabmykey_settings_updated', handleSettingsUpdated);
 
+    const handlePropertiesUpdated = () => {
+      loadData();
+    };
+    window.addEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
+    window.addEventListener('grabmykey_property_created', handlePropertiesUpdated);
+
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('grabmykey_settings_updated', handleSettingsUpdated);
+      window.removeEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
+      window.removeEventListener('grabmykey_property_created', handlePropertiesUpdated);
     };
   }, [navigate]);
 

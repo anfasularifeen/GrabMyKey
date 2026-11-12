@@ -2,7 +2,7 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { MapPin, Building2 } from 'lucide-react';
 
-export default function PropertyCard({ property }) {
+export default function PropertyCard({ property = null }) {
   if (!property) return null;
 
   const propId = property.id || property._id || property.slug || '';

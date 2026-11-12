@@ -120,7 +120,7 @@ export const deleteLead = async (id) => {
 
 export const checkServerHealth = async () => {
   try {
-    const res = await axios.get('http://localhost:5000/api/properties', { timeout: 3000 });
+    const res = await axios.get(`${API_BASE_URL}/properties`, { timeout: 3000 });
     return { online: true, source: res.data?.source || 'live' };
   } catch {
     return { online: false, source: 'offline' };

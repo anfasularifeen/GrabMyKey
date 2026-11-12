@@ -1,17 +1,7 @@
 import axios from 'axios';
+import { API_BASE_URL, getApiBaseUrl, API_ENDPOINTS } from './config/api';
 
-// Base API URL supporting localhost and public LAN network IP access
-const getApiBaseUrl = () => {
-  if (typeof import.meta !== 'undefined' && import.meta.env?.VITE_API_BASE_URL) {
-    return import.meta.env.VITE_API_BASE_URL;
-  }
-  if (typeof window !== 'undefined' && window.location?.hostname && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `http://${window.location.hostname}:5000/api`;
-  }
-  return 'http://localhost:5000/api';
-};
-
-const API_BASE_URL = getApiBaseUrl();
+export { API_BASE_URL, getApiBaseUrl, API_ENDPOINTS };
 
 // Session-based offline detection to prevent hammering a closed port
 let isBackendOffline = typeof window !== 'undefined' ? sessionStorage.getItem('gmk_backend_offline') === 'true' : false;
@@ -176,46 +166,21 @@ export const isMockProperty = (p) => {
   return false;
 };
 
+// Immediate purge of any legacy localStorage mock caches
+if (typeof window !== 'undefined') {
+  try {
+    localStorage.removeItem('grabmykey_properties');
+    localStorage.removeItem('grabmykey_hero_settings');
+  } catch (e) {}
+}
+
 // Fetch all live properties exclusively from Express backend API
 export const fetchProperties = async () => {
-  const getCachedFallback = () => {
-    let localData = [];
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('grabmykey_properties');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            // Strictly exclude any legacy mock properties
-            localData = parsed.filter(p => !isMockProperty(p)).map(normalizeProperty);
-            // Resave sanitized version
-            localStorage.setItem('grabmykey_properties', JSON.stringify(localData));
-          }
-        }
-      } catch (e) {
-        localData = [];
-      }
-    }
-    return {
-      success: localData.length > 0,
-      count: localData.length,
-      data: localData,
-      fromCache: true
-    };
-  };
-
-  if (!shouldAttemptBackend()) {
-    return getCachedFallback();
-  }
-
   try {
     const res = await apiClient.get('/properties');
     if (res?.data && Array.isArray(res.data)) {
       const sanitized = res.data.filter(p => !isMockProperty(p));
       const normalizedData = sanitized.map(normalizeProperty);
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('grabmykey_properties', JSON.stringify(normalizedData));
-      }
       return {
         ...res,
         count: normalizedData.length,
@@ -228,42 +193,17 @@ export const fetchProperties = async () => {
       data: []
     };
   } catch (err) {
-    return getCachedFallback();
+    return {
+      success: false,
+      count: 0,
+      data: []
+    };
   }
 };
 
 // Fetch single property by ID or Slug exclusively from Express backend API
 export const fetchPropertyById = async (id) => {
-  const getCachedFallback = () => {
-    const target = String(id).toLowerCase();
-    let found = null;
-    if (typeof window !== 'undefined') {
-      try {
-        const cached = localStorage.getItem('grabmykey_properties');
-        if (cached) {
-          const parsed = JSON.parse(cached);
-          if (Array.isArray(parsed)) {
-            found = parsed.find(p => 
-              (String(p?.id || '').toLowerCase() === target || 
-              String(p?._id || '').toLowerCase() === target || 
-              String(p?.slug || '').toLowerCase() === target) &&
-              !isMockProperty(p)
-            );
-          }
-        }
-      } catch (e) {}
-    }
-    return {
-      success: Boolean(found),
-      data: found ? normalizeProperty(found) : null,
-      fromCache: Boolean(found)
-    };
-  };
-
-  if (!shouldAttemptBackend()) {
-    return getCachedFallback();
-  }
-
+  if (!id) return { success: false, data: null };
   try {
     const res = await apiClient.get(`/properties/${id}`);
     if (res?.data && !isMockProperty(res.data)) {
@@ -272,10 +212,8 @@ export const fetchPropertyById = async (id) => {
         data: normalizeProperty(res.data)
       };
     }
-    return getCachedFallback();
-  } catch (err) {
-    return getCachedFallback();
-  }
+  } catch (err) {}
+  return { success: false, data: null };
 };
 
 // Create a new property listing (Admin PIN verified)

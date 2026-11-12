@@ -1,19 +1,99 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Play, ArrowUpRight } from 'lucide-react';
 import { Link } from 'react-router-dom';
+import { API_ENDPOINTS } from '../config/api';
 
 export function HeroFeaturedVideoCard({ property = null }) {
   const [isPlaying, setIsPlaying] = useState(false);
   const [featuredProperty, setFeaturedProperty] = useState(null);
 
+  // Dynamic fetch when rendered standalone without property prop
+  useEffect(() => {
+    if (property) {
+      setFeaturedProperty(property);
+      return;
+    }
+
+    let isMounted = true;
+    const fetchFeatured = async () => {
+      try {
+        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+
+        const res = await fetch(apiUrl);
+        if (res.ok) {
+          const json = await res.json();
+          const list = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+          const heroPick = list.find(p => p && (p.isFeatured === true || p.featured === true)) ||
+                           list.find(p => p && (p.videoUrl || p.heroVideoUrl || p.youtubeVideoId)) ||
+                           (list.length > 0 ? list[0] : null);
+
+          if (isMounted) setFeaturedProperty(heroPick);
+        }
+      } catch {
+        // silent fallback
+      }
+    };
+
+    fetchFeatured();
+
+    const handleSync = () => fetchFeatured();
+    window.addEventListener('grabmykey_property_created', handleSync);
+    window.addEventListener('grabmykey_properties_updated', handleSync);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('grabmykey_property_created', handleSync);
+      window.removeEventListener('grabmykey_properties_updated', handleSync);
+    };
+  }, [property]);
+
   const activeProperty = property || featuredProperty;
-  if (!activeProperty) return null;
+  if (!activeProperty) {
+    return (
+      <div className="relative w-full max-w-xl rounded-3xl overflow-hidden bg-slate-950 border border-slate-200 shadow-xl aspect-[16/11] flex flex-col justify-between p-6">
+        <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-slate-950 to-black" />
+        <div className="relative z-10 flex justify-between items-center">
+          <span className="px-3 py-1 rounded-lg bg-slate-900/80 backdrop-blur-md text-[11px] font-medium text-white border border-white/10 font-sans">
+            Featured Video Tour
+          </span>
+          <span className="px-3 py-1 rounded-full bg-white/90 backdrop-blur-md text-[10px] font-bold text-slate-900 uppercase tracking-wider font-sans">
+            MANGALURU, KA
+          </span>
+        </div>
+        <div className="relative z-10 p-4 rounded-2xl bg-slate-900/60 backdrop-blur-md border border-white/10 flex items-center justify-between gap-3 my-auto">
+          <div className="min-w-0 space-y-0.5">
+            <h3 className="text-base font-bold text-white tracking-tight truncate" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
+              No Featured Video Tour
+            </h3>
+            <p className="text-xs text-slate-300 font-sans truncate">
+              Add listings via Admin Console to feature on-site walkthroughs
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  const getEmbedVideoUrl = (url, videoId) => {
+    if (videoId) return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    if (!url) return null;
+    if (url.includes('embed/')) return url.includes('autoplay') ? url : `${url}?autoplay=1`;
+    if (url.includes('watch?v=')) {
+      const id = url.split('watch?v=')[1]?.split('&')[0];
+      return `https://www.youtube.com/embed/${id}?autoplay=1`;
+    }
+    if (url.includes('youtu.be/')) {
+      const id = url.split('youtu.be/')[1]?.split('?')[0];
+      return `https://www.youtube.com/embed/${id}?autoplay=1`;
+    }
+    return url;
+  };
 
   const item = {
     title: activeProperty.title || "Exclusive Estate",
     location: activeProperty.location || (activeProperty.locality ? `${activeProperty.locality}, ${activeProperty.city || 'Mangaluru'}` : "Mangaluru"),
     priceText: activeProperty.priceText || (activeProperty.price ? String(activeProperty.price).replace(/^₹/, '').replace(/ •.*/, '') : ''),
-    videoUrl: activeProperty.videoUrl || (activeProperty.youtubeVideoId ? `https://www.youtube.com/embed/${activeProperty.youtubeVideoId}?autoplay=1` : null),
+    videoUrl: getEmbedVideoUrl(activeProperty.heroVideoUrl || activeProperty.videoUrl, activeProperty.youtubeVideoId),
     thumbnail: activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
     slug: activeProperty.slug || activeProperty._id || activeProperty.id
   };

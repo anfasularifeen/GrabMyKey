@@ -4,7 +4,8 @@ import mongoose from 'mongoose';
 const ComponentItemSchema = new mongoose.Schema({
   categoryName: { type: String, required: true }, // e.g., "Interior & Living", "Building & Security"
   featureName: { type: String, required: true },  // e.g., "Modular Kitchen", "Power Backup"
-  isAvailable: { type: Boolean, default: true },  // true = ✓, false = —
+  isAvailable: { type: Boolean, default: false },  // true = ✓, false = —
+  status: { type: String, default: 'Not Included' },
   descriptionNote: { type: String, default: "" } // e.g., "Teak finish with Faber chimney"
 }, { _id: true });
 
@@ -65,8 +66,8 @@ const PropertySchema = new mongoose.Schema({
   dealType: { type: String, enum: ['Resale', 'Rental', 'New Launch', 'Direct Sale'], required: true, default: 'Resale' },
   
   pricing: {
-    expectedPrice: { type: Number, required: true },
-    isNegotiable: { type: Boolean, default: true },
+    expectedPrice: { type: Number, default: 0 },
+    isNegotiable: { type: Boolean, default: false },
     maintenanceFee: { type: Number, default: 0 }
   },
 
@@ -77,15 +78,15 @@ const PropertySchema = new mongoose.Schema({
     furnishingStatus: { 
       type: String, 
       enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished', 'Furnished'],
-      default: 'Fully Furnished'
+      default: 'Unfurnished'
     },
     floorLevel: { type: String, default: 'G' },
     totalFloors: { type: String, default: '1' }
   },
 
-  youtubeVideoId: { type: String, required: true },
+  youtubeVideoId: { type: String, default: '' },
   galleryImages: { type: [String], default: [] },
-  description: { type: String, required: true },
+  description: { type: String, default: '' },
 
   // Dynamic & Manual Admin Matrices
   componentsMatrix: [ComponentItemSchema],
@@ -100,11 +101,14 @@ const PropertySchema = new mongoose.Schema({
     localityGrowthDriver: { type: String, default: '' }
   },
 
-  advocateVerificationAvailable: { type: Boolean, default: true },
+  advocateAudit: { type: mongoose.Schema.Types.Mixed, default: {} },
+  advocateVerificationAvailable: { type: Boolean, default: false },
   isFeatured: { type: Boolean, default: false },
   status: { type: String, enum: ['Active', 'Draft', 'Sold', 'Rented'], default: 'Active' },
 
-  // Backward-compatibility legacy fields
+  // Direct Payload & Backward-compatibility Fields
+  carpetArea: { type: mongoose.Schema.Types.Mixed },
+  heroVideoUrl: { type: String, default: '' },
   location: { type: String, trim: true },
   price: { type: String, trim: true },
   priceRaw: { type: Number, default: 0 },
@@ -223,14 +227,30 @@ PropertySchema.pre('save', function () {
     this.area = `${this.specs.carpetAreaSqFt.toLocaleString('en-IN')} sq.ft`;
   }
 
-  // Sync YouTube Video ID & URL
+  // Sync YouTube Video ID, heroVideoUrl & videoUrl
+  if (!this.heroVideoUrl && this.videoUrl) {
+    this.heroVideoUrl = this.videoUrl;
+  }
+  if (!this.videoUrl && this.heroVideoUrl) {
+    this.videoUrl = this.heroVideoUrl;
+  }
   if (!this.youtubeVideoId && this.videoUrl) {
     this.youtubeVideoId = extractYouTubeId(this.videoUrl);
   }
   if (!this.videoUrl && this.youtubeVideoId) {
     this.videoUrl = `https://www.youtube.com/watch?v=${this.youtubeVideoId}`;
+    if (!this.heroVideoUrl) this.heroVideoUrl = this.videoUrl;
   }
   this.hasVideo = Boolean(this.youtubeVideoId || (this.videoUrl && this.videoUrl.trim().length > 0));
+
+  // Sync carpetArea with specs and area string
+  if (this.carpetArea && (!this.specs || !this.specs.carpetAreaSqFt)) {
+    const parsedArea = Number(this.carpetArea) || parseInt(String(this.carpetArea).replace(/[^0-9]/g, ''), 10) || 0;
+    if (this.specs) this.specs.carpetAreaSqFt = parsedArea;
+  }
+  if (this.carpetArea && !this.area) {
+    this.area = `${this.carpetArea} sq.ft`;
+  }
 
   // Sync images and galleryImages
   if ((!this.galleryImages || this.galleryImages.length === 0) && Array.isArray(this.images) && this.images.length > 0) {

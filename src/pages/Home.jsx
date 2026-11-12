@@ -3,6 +3,8 @@ import { Link, useNavigate } from 'react-router-dom';
 import { Search, ChevronDown, Play, ArrowUpRight, Building2 } from 'lucide-react';
 import { useProperties } from '../context/PropertyContext';
 import PropertyCard from '../components/PropertyCard';
+import FeaturedProperties from '../components/FeaturedProperties';
+import { API_ENDPOINTS } from '../config/api';
 
 export default function Home({
   searchQuery: externalSearchQuery,
@@ -11,11 +13,11 @@ export default function Home({
   setSelectedRegion: externalSetSelectedRegion,
   onBrowseAll,
   property = null,
-  properties: externalProperties = [],
+  properties: externalProperties,
   showGrid = true
 } = {}) {
   const navigate = useNavigate();
-  const { properties: contextProperties = [], isLoading } = useProperties();
+  const { properties: contextProperties = [], isLoading: contextLoading } = useProperties();
   
   // Wipe default initial states: strictly start empty [] and null
   const [properties, setProperties] = useState([]);
@@ -23,24 +25,87 @@ export default function Home({
   const [isPlaying, setIsPlaying] = useState(false);
   const [localSearch, setLocalSearch] = useState('');
   const [localRegion, setLocalRegion] = useState('All');
+  const [isLoading, setIsLoading] = useState(true);
 
-  // Synchronize with external or context properties
-  useEffect(() => {
-    const list = Array.isArray(externalProperties) && externalProperties.length > 0
-      ? externalProperties
-      : (Array.isArray(contextProperties) ? contextProperties : []);
-    setProperties(list);
-  }, [externalProperties, contextProperties]);
-
-  useEffect(() => {
-    if (property) {
-      setFeaturedProperty(property);
-    } else if (properties.length > 0) {
-      setFeaturedProperty(properties[0]);
-    } else {
-      setFeaturedProperty(null);
+  // Helper to extract proper YouTube embed URL
+  const getEmbedVideoUrl = (url, videoId) => {
+    if (videoId) return `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    if (!url) return null;
+    if (url.includes('embed/')) return url.includes('autoplay') ? url : `${url}?autoplay=1`;
+    if (url.includes('watch?v=')) {
+      const id = url.split('watch?v=')[1]?.split('&')[0];
+      return `https://www.youtube.com/embed/${id}?autoplay=1`;
     }
-  }, [property, properties]);
+    if (url.includes('youtu.be/')) {
+      const id = url.split('youtu.be/')[1]?.split('?')[0];
+      return `https://www.youtube.com/embed/${id}?autoplay=1`;
+    }
+    return url;
+  };
+
+  // Dynamic Home Page Re-fetching from GET /api/properties on mount
+  useEffect(() => {
+    let isMounted = true;
+
+    const fetchProperties = async () => {
+      try {
+        setIsLoading(true);
+        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+
+        const res = await fetch(apiUrl);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const json = await res.json();
+        const data = Array.isArray(json?.data) ? json.data : (Array.isArray(json) ? json : []);
+
+        if (isMounted) {
+          setProperties(data);
+
+          // Automatically pick the first listing marked as featured (or having a video URL) as HeroFeaturedVideoCard
+          if (property) {
+            setFeaturedProperty(property);
+          } else {
+            const heroPick = data.find(p => p && (p.isFeatured === true || p.featured === true)) ||
+                             data.find(p => p && (p.videoUrl || p.heroVideoUrl || p.youtubeVideoId)) ||
+                             (data.length > 0 ? data[0] : null);
+            setFeaturedProperty(heroPick);
+          }
+        }
+      } catch (err) {
+        console.warn('GET /api/properties fetch warning:', err.message);
+        if (isMounted) {
+          const fallbackList = Array.isArray(externalProperties) && externalProperties.length > 0
+            ? externalProperties
+            : (Array.isArray(contextProperties) ? contextProperties : []);
+          setProperties(fallbackList);
+          if (property) {
+            setFeaturedProperty(property);
+          } else {
+            const heroFallback = fallbackList.find(p => p && (p.isFeatured === true || p.featured === true)) ||
+                                 fallbackList.find(p => p && (p.videoUrl || p.heroVideoUrl || p.youtubeVideoId)) ||
+                                 (fallbackList.length > 0 ? fallbackList[0] : null);
+            setFeaturedProperty(heroFallback);
+          }
+        }
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    };
+
+    fetchProperties();
+
+    // Re-fetch on property creation/update events
+    const handleSync = () => {
+      fetchProperties();
+    };
+    window.addEventListener('grabmykey_property_created', handleSync);
+    window.addEventListener('grabmykey_properties_updated', handleSync);
+
+    return () => {
+      isMounted = false;
+      window.removeEventListener('grabmykey_property_created', handleSync);
+      window.removeEventListener('grabmykey_properties_updated', handleSync);
+    };
+  }, [property, externalProperties, contextProperties]);
   
   const searchQuery = externalSearchQuery !== undefined ? externalSearchQuery : localSearch;
   const setSearchQuery = externalSetSearchQuery || setLocalSearch;
@@ -51,7 +116,7 @@ export default function Home({
   const activeListings = Array.isArray(properties) ? properties : [];
   const featured = featuredProperty;
 
-  const activeVideoUrl = featured?.videoUrl || (featured?.youtubeVideoId ? `https://www.youtube.com/embed/${featured.youtubeVideoId}?autoplay=1` : null);
+  const activeVideoUrl = getEmbedVideoUrl(featured?.videoUrl || featured?.heroVideoUrl, featured?.youtubeVideoId);
   const featuredPoster = featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
 
   const handleSearchSubmit = (e) => {
@@ -248,55 +313,11 @@ export default function Home({
             </Link>
           </div>
 
-          {isLoading && activeListings.length === 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {[1, 2, 3, 4].map((n) => (
-                <div key={n} className="bg-white border border-slate-200/80 rounded-2xl overflow-hidden animate-pulse flex flex-col justify-between shadow-xs">
-                  <div className="h-56 bg-slate-100" />
-                  <div className="p-6 space-y-3">
-                    <div className="h-3 bg-slate-200 rounded w-1/3" />
-                    <div className="h-5 bg-slate-200 rounded w-3/4" />
-                    <div className="h-3 bg-slate-100 rounded w-full" />
-                  </div>
-                  <div className="px-6 pb-6 pt-4 border-t border-slate-100 flex justify-between items-center">
-                    <div className="h-5 bg-slate-200 rounded w-20" />
-                    <div className="h-4 bg-slate-100 rounded w-16" />
-                  </div>
-                </div>
-              ))}
-            </div>
-          ) : activeListings.length > 0 ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-              {activeListings.slice(0, 4).map((property) => (
-                <PropertyCard key={property.id || property._id || property.slug} property={property} />
-              ))}
-            </div>
-          ) : (
-            <div className="py-14 px-6 rounded-3xl bg-white border border-slate-200/80 text-center space-y-3 shadow-xs">
-              <div className="w-12 h-12 rounded-2xl bg-[#FAF8F5] border border-[#C59B27]/30 flex items-center justify-center mx-auto text-[#C59B27]">
-                <Building2 className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-serif font-bold text-[#0F172A]" style={{ fontFamily: "'Playfair Display', Georgia, serif" }}>
-                No Properties Listed Yet
-              </h3>
-              <p className="text-xs text-slate-500 font-sans max-w-md mx-auto leading-relaxed">
-                No properties listed yet. Add a listing from admin panel.
-              </p>
-              <div className="pt-2">
-                <Link
-                  to="/manage-345"
-                  className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F172A] hover:bg-[#C59B27] text-white rounded-xl text-xs font-semibold transition-colors font-sans shadow-sm"
-                >
-                  <span>Open Admin Panel</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </Link>
-              </div>
-            </div>
-          )}
+          <FeaturedProperties properties={activeListings} isLoading={isLoading} />
         </section>
       )}
     </div>
   );
 }
 
-export { Home as HeroSection, Home };
+export { Home as HeroSection, Home, FeaturedProperties };

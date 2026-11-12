@@ -29,47 +29,48 @@ import {
 import { DEFAULT_MASTER_PRESETS, ASSET_SPEC_PRESETS, getAssetSpecPresets } from './defaultPresets';
 import Navbar from './components/admin/Navbar';
 import Sidebar from './components/admin/Sidebar';
+import AddCustomItemModal from './components/AddCustomItemModal';
 
 
 
-// Preset: Default 12-Point Legal Checklist
+// Preset: Default 12-Point Legal Checklist (Defaults to Pending for new listings)
 const DEFAULT_12_POINT_LEGAL_CHECKLIST = [
-  { documentName: "Parent Title Deed", category: "Ownership", verifiedStatus: "Verified", verificationNote: "30-Year clear parent deed chain verified by High Court panel", isCustomItem: false },
-  { documentName: "Encumbrance Certificate (30-Year EC)", category: "Ownership", verifiedStatus: "Verified", verificationNote: "Nil encumbrance Form 15 issued via Kaveri / registration portal", isCustomItem: false },
-  { documentName: "Khata / Possession Certificate", category: "Municipal", verifiedStatus: "Verified", verificationNote: "A-Khata / Possession Certificate active and on record", isCustomItem: false },
-  { documentName: "Latest Property Tax Receipts", category: "Tax", verifiedStatus: "Verified", verificationNote: "Municipal property tax cleared through current financial year", isCustomItem: false },
-  { documentName: "Building Sanction Plan", category: "Municipal", verifiedStatus: "Verified", verificationNote: "Sanctioned approved construction blueprint on record", isCustomItem: false },
-  { documentName: "Occupancy Certificate (OC)", category: "Municipal", verifiedStatus: "Verified", verificationNote: "Final Occupancy Certificate issued by statutory authority", isCustomItem: false },
-  { documentName: "No Objection Certificates (NOCs)", category: "Municipal", verifiedStatus: "Verified", verificationNote: "Statutory fire, pollution, and structural NOCs cleared", isCustomItem: false },
-  { documentName: "NOC from Society / Association", category: "Municipal", verifiedStatus: "Verified", verificationNote: "RWA / Society dues clearance and transfer NOC verified", isCustomItem: false },
-  { documentName: "Possession & Allotment Letter", category: "Ownership", verifiedStatus: "Verified", verificationNote: "Original physical allotment letter and possession memo", isCustomItem: false },
-  { documentName: "Utility Dues Clearances", category: "Tax", verifiedStatus: "Verified", verificationNote: "Power (MESCOM) and water board zero-dues receipt", isCustomItem: false },
-  { documentName: "Mutation Register Extract (RTC/Pahani)", category: "Ownership", verifiedStatus: "Verified", verificationNote: "Revenue mutation extract / RTC reflects unambiguous title", isCustomItem: false },
-  { documentName: "Revenue / Survey Map (FMB)", category: "Ownership", verifiedStatus: "Verified", verificationNote: "Field Measurement Book (FMB) sketch matches physical boundary", isCustomItem: false }
+  { documentName: "Parent Title Deed", category: "Ownership", verifiedStatus: "Pending", verificationNote: "30-Year clear parent deed chain audit", isCustomItem: false },
+  { documentName: "Encumbrance Certificate (30-Year EC)", category: "Ownership", verifiedStatus: "Pending", verificationNote: "Nil encumbrance Form 15 status", isCustomItem: false },
+  { documentName: "Khata / Possession Certificate", category: "Municipal", verifiedStatus: "Pending", verificationNote: "A-Khata / Possession Certificate verification", isCustomItem: false },
+  { documentName: "Latest Property Tax Receipts", category: "Tax", verifiedStatus: "Pending", verificationNote: "Municipal property tax clearance", isCustomItem: false },
+  { documentName: "Building Sanction Plan", category: "Municipal", verifiedStatus: "Pending", verificationNote: "Sanctioned approved construction blueprint on record", isCustomItem: false },
+  { documentName: "Occupancy Certificate (OC)", category: "Municipal", verifiedStatus: "Pending", verificationNote: "Final Occupancy Certificate issued by statutory authority", isCustomItem: false },
+  { documentName: "No Objection Certificates (NOCs)", category: "Municipal", verifiedStatus: "Pending", verificationNote: "Statutory fire, pollution, and structural NOCs", isCustomItem: false },
+  { documentName: "NOC from Society / Association", category: "Municipal", verifiedStatus: "Pending", verificationNote: "RWA / Society dues clearance and transfer NOC", isCustomItem: false },
+  { documentName: "Possession & Allotment Letter", category: "Ownership", verifiedStatus: "Pending", verificationNote: "Original physical allotment letter and possession memo", isCustomItem: false },
+  { documentName: "Utility Dues Clearances", category: "Tax", verifiedStatus: "Pending", verificationNote: "Power (MESCOM) and water board zero-dues receipt", isCustomItem: false },
+  { documentName: "Mutation Register Extract (RTC/Pahani)", category: "Ownership", verifiedStatus: "Pending", verificationNote: "Revenue mutation extract / RTC status", isCustomItem: false },
+  { documentName: "Revenue / Survey Map (FMB)", category: "Ownership", verifiedStatus: "Pending", verificationNote: "Field Measurement Book (FMB) physical boundary verification", isCustomItem: false }
 ];
 
-// Preset: Default Dynamic Property Features Matrix (Clean naming & detailed notes)
+// Preset: Default Dynamic Property Features Matrix (Defaults to Not Included for new listings)
 const DEFAULT_PROPERTY_FEATURES = [
   // Build & Material Specifications
-  { categoryName: "Build & Materials", featureName: "Flooring Type", isAvailable: true, descriptionNote: "Imported Italian Marble (Living) + Teak Hardwood (Bedrooms)" },
-  { categoryName: "Build & Materials", featureName: "Wood & Joinery", isAvailable: true, descriptionNote: "100% Seasoned Burma Teakwood (Doors, Frames & Windows)" },
-  { categoryName: "Build & Materials", featureName: "Wall Finish & Paint", isAvailable: true, descriptionNote: "ROYAL Silk Emulsion + Texture Accent Walls" },
-  { categoryName: "Build & Materials", featureName: "Structural Frame", isAvailable: true, descriptionNote: "Earthquake Resistant RCC Framed Structure (M25 Grade)" },
-  { categoryName: "Build & Materials", featureName: "Roofing & Insulation", isAvailable: true, descriptionNote: "Sloped Concrete Slab with Terracotta Tiles & Heat Shield Insulation" },
-  { categoryName: "Build & Materials", featureName: "Sanitaryware & Fittings", isAvailable: true, descriptionNote: "Kohler / Grohe Concealed Diverters & Wall-Hung Closets" },
+  { categoryName: "Build & Materials", featureName: "Flooring Type", isAvailable: false, status: 'Not Included', descriptionNote: "Imported Italian Marble (Living) + Teak Hardwood (Bedrooms)" },
+  { categoryName: "Build & Materials", featureName: "Wood & Joinery", isAvailable: false, status: 'Not Included', descriptionNote: "100% Seasoned Burma Teakwood (Doors, Frames & Windows)" },
+  { categoryName: "Build & Materials", featureName: "Wall Finish & Paint", isAvailable: false, status: 'Not Included', descriptionNote: "ROYAL Silk Emulsion + Texture Accent Walls" },
+  { categoryName: "Build & Materials", featureName: "Structural Frame", isAvailable: false, status: 'Not Included', descriptionNote: "Earthquake Resistant RCC Framed Structure (M25 Grade)" },
+  { categoryName: "Build & Materials", featureName: "Roofing & Insulation", isAvailable: false, status: 'Not Included', descriptionNote: "Sloped Concrete Slab with Terracotta Tiles & Heat Shield Insulation" },
+  { categoryName: "Build & Materials", featureName: "Sanitaryware & Fittings", isAvailable: false, status: 'Not Included', descriptionNote: "Kohler / Grohe Concealed Diverters & Wall-Hung Closets" },
 
   // Interior & Living
-  { categoryName: "Interior & Living", featureName: "Modular Kitchen", isAvailable: true, descriptionNote: "Faber Chimney, Blum Soft-Close Hardware & Quartz Island" },
-  { categoryName: "Interior & Living", featureName: "Air Conditioning", isAvailable: true, descriptionNote: "Daikin VRV Centralized Inverter Climate Control" },
+  { categoryName: "Interior & Living", featureName: "Modular Kitchen", isAvailable: false, status: 'Not Included', descriptionNote: "Faber Chimney, Blum Soft-Close Hardware & Quartz Island" },
+  { categoryName: "Interior & Living", featureName: "Air Conditioning", isAvailable: false, status: 'Not Included', descriptionNote: "Daikin VRV Centralized Inverter Climate Control" },
 
   // Building & Security
-  { categoryName: "Building & Security", featureName: "CCTV & Security", isAvailable: true, descriptionNote: "8-Channel IP Cameras + Biometric Video Door Phone" },
-  { categoryName: "Building & Security", featureName: "Automated Gate", isAvailable: true, descriptionNote: "Motorized RFID Sensor Ingress Gate" },
+  { categoryName: "Building & Security", featureName: "CCTV & Security", isAvailable: false, status: 'Not Included', descriptionNote: "8-Channel IP Cameras + Biometric Video Door Phone" },
+  { categoryName: "Building & Security", featureName: "Automated Gate", isAvailable: false, status: 'Not Included', descriptionNote: "Motorized RFID Sensor Ingress Gate" },
 
   // Utilities & Outdoor
-  { categoryName: "Utilities", featureName: "Power Backup", isAvailable: true, descriptionNote: "15 kVA Silent DG Generator with Auto-Transfer Switch" },
-  { categoryName: "Utilities", featureName: "Water Supply", isAvailable: true, descriptionNote: "Dual Source (Open Well + Municipal Supply + 10,000L Sump)" },
-  { categoryName: "Outdoor", featureName: "Covered Vehicle Parking", isAvailable: true, descriptionNote: "3 SUV Parking Bay with Integrated 11kW EV Fast Charger" }
+  { categoryName: "Utilities", featureName: "Power Backup", isAvailable: false, status: 'Not Included', descriptionNote: "15 kVA Silent DG Generator with Auto-Transfer Switch" },
+  { categoryName: "Utilities", featureName: "Water Supply", isAvailable: false, status: 'Not Included', descriptionNote: "Dual Source (Open Well + Municipal Supply + 10,000L Sump)" },
+  { categoryName: "Outdoor", featureName: "Covered Vehicle Parking", isAvailable: false, status: 'Not Included', descriptionNote: "3 SUV Parking Bay with Integrated 11kW EV Fast Charger" }
 ];
 const DEFAULT_CAR_STYLE_FEATURES = DEFAULT_PROPERTY_FEATURES; // Alias for backward compatibility
 
@@ -81,7 +82,7 @@ const DEFAULT_TRANSIT_MATRIX = [
   { landmarkName: "Mangalore City Central / Hampankatta", destination: "Mangalore City Central / Hampankatta", distanceText: "17.5 km", distanceKm: 17.5, durationText: "25m", travelTimeMins: 25, travelMode: "Drive", transportMode: "Drive" }
 ];
 
-// Initial state for property creation/editing
+// Initial state for property creation/editing (All toggles & checkboxes default to false / unchecked)
 const INITIAL_FORM_STATE = {
   title: '',
   slug: '',
@@ -90,12 +91,12 @@ const INITIAL_FORM_STATE = {
   category: 'Villa',
   dealType: 'Resale',
   expectedPrice: 27500000,
-  isNegotiable: true,
-  maintenanceFee: 5000,
+  isNegotiable: false,
+  maintenanceFee: 0,
   bedrooms: 4,
   bathrooms: 4,
   carpetAreaSqFt: 3800,
-  furnishingStatus: 'Fully Furnished',
+  furnishingStatus: 'Unfurnished',
   floorLevel: 'G+1',
   totalFloors: '2',
   youtubeVideoId: '',
@@ -104,9 +105,9 @@ const INITIAL_FORM_STATE = {
   badge: 'Verified Listing',
   isFeatured: false,
   status: 'Active',
-  advocateVerificationAvailable: true,
+  advocateVerificationAvailable: false,
 
-  // Dynamic Car-Style Feature Matrix
+  // Dynamic Car-Style Feature Matrix (Defaults to Not Included)
   componentsMatrix: DEFAULT_CAR_STYLE_FEATURES,
 
   // Manual Strategic Transit & Infrastructure
@@ -114,8 +115,17 @@ const INITIAL_FORM_STATE = {
   roadIngressText: '',
   zoningTagText: '',
 
-  // Dynamic Self-Verifiable Legal Audit
+  // Dynamic Self-Verifiable Legal Audit (Defaults to Pending)
   legalVerification: DEFAULT_12_POINT_LEGAL_CHECKLIST,
+
+  // Statutory Advocate Audit State
+  advocateAudit: {
+    parentDeedAudit: 'Pending',
+    encumbranceCertificate: 'Pending',
+    revenueRtcCompliance: 'Pending',
+    mccPlanApprovals: 'Pending',
+    dgpsSurveyVerification: 'Pending'
+  },
 
   // Investment Analysis
   rentalYieldEst: '',
@@ -139,16 +149,6 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   // Data states
   const [properties, setProperties] = useState([]);
-
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('grabmykey_properties', JSON.stringify(properties));
-      } catch (e) {
-        console.warn('Failed to persist properties', e);
-      }
-    }
-  }, [properties]);
   const [leads, setLeads] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -181,6 +181,16 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const [uploadedFiles, setUploadedFiles] = useState([]);
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
 
+  // Custom Modal State (Replacing window.prompt)
+  const [customItemModal, setCustomItemModal] = useState({
+    isOpen: false,
+    type: '', // 'FEATURE' | 'LEGAL'
+    categoryName: '',
+    title: '',
+    note: '',
+    status: 'Verified'
+  });
+
   // Hero Featured Video & Settings state
   const [heroSettings, setHeroSettings] = useState({
     heroFeaturedPropertyId: '',
@@ -192,13 +202,14 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const [isSavingHeroSettings, setIsSavingHeroSettings] = useState(false);
   const [heroSaveSuccess, setHeroSaveSuccess] = useState(false);
 
-  // Dynamic feature selector based on category and presets
-  const getFeaturesForCategory = (cat) => {
+  // Dynamic feature selector based on category and presets (defaults to false / Not Included for new listings)
+  const getFeaturesForCategory = (cat, defaultAvailable = false) => {
     const rawPresets = getAssetSpecPresets(cat);
     return rawPresets.map(p => ({
       categoryName: p.category,
       featureName: p.feature,
-      isAvailable: p.status === 'Included',
+      isAvailable: defaultAvailable,
+      status: defaultAvailable ? 'Included' : 'Not Included',
       descriptionNote: p.details
     }));
   };
@@ -379,6 +390,15 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   useEffect(() => {
     loadData();
+    const handleRefreshEvent = () => {
+      loadData();
+    };
+    window.addEventListener('grabmykey_properties_updated', handleRefreshEvent);
+    window.addEventListener('grabmykey_property_created', handleRefreshEvent);
+    return () => {
+      window.removeEventListener('grabmykey_properties_updated', handleRefreshEvent);
+      window.removeEventListener('grabmykey_property_created', handleRefreshEvent);
+    };
   }, []);
 
   // Navigation handlers
@@ -569,7 +589,6 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       };
       const res = await updateSiteSettings(payload);
       if (res?.success) {
-        localStorage.setItem('grabmykey_hero_settings', JSON.stringify(res.data));
         window.dispatchEvent(new CustomEvent('grabmykey_settings_updated', { detail: res.data }));
         setHeroSaveSuccess(true);
         setTimeout(() => setHeroSaveSuccess(false), 3000);
@@ -636,21 +655,14 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   };
 
   const handleAddCustomFeature = (categoryName = 'Interior & Living') => {
-    const featureName = window.prompt(`Enter feature name for ${categoryName}:`, 'Modular Chimney & Hob');
-    if (!featureName || !featureName.trim()) return;
-    const note = window.prompt('Enter optional description note (or leave blank):', '');
-    setFormData(prev => ({
-      ...prev,
-      componentsMatrix: [
-        ...(prev.componentsMatrix || []),
-        {
-          categoryName,
-          featureName: featureName.trim(),
-          isAvailable: true,
-          descriptionNote: (note || '').trim()
-        }
-      ]
-    }));
+    setCustomItemModal({
+      isOpen: true,
+      type: 'FEATURE',
+      categoryName,
+      title: '',
+      note: '',
+      status: 'Included'
+    });
   };
 
   const handleResetDefaultFeatures = () => {
@@ -766,21 +778,51 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   };
 
   const handleAddCustomLegalCheck = () => {
-    const docName = window.prompt('Enter statutory clearance / document name:', 'Coastal Regulation Zone (CRZ) Clearance');
-    if (!docName || !docName.trim()) return;
-    setFormData(prev => ({
-      ...prev,
-      legalVerification: [
-        ...(prev.legalVerification || []),
-        {
-          documentName: docName.trim(),
-          category: 'Custom',
-          verifiedStatus: 'Verified',
-          verificationNote: 'Audited clearance on record',
-          isCustomItem: true
-        }
-      ]
-    }));
+    setCustomItemModal({
+      isOpen: true,
+      type: 'LEGAL',
+      categoryName: 'Custom Clearance',
+      title: '',
+      note: '',
+      status: 'Verified'
+    });
+  };
+
+  const handleConfirmCustomModal = () => {
+    if (!customItemModal.title.trim()) {
+      alert('Please enter a valid title.');
+      return;
+    }
+    if (customItemModal.type === 'FEATURE') {
+      setFormData(prev => ({
+        ...prev,
+        componentsMatrix: [
+          ...(prev.componentsMatrix || []),
+          {
+            categoryName: customItemModal.categoryName || 'General',
+            featureName: customItemModal.title.trim(),
+            isAvailable: true,
+            status: 'Included',
+            descriptionNote: (customItemModal.note || '').trim()
+          }
+        ]
+      }));
+    } else if (customItemModal.type === 'LEGAL') {
+      setFormData(prev => ({
+        ...prev,
+        legalVerification: [
+          ...(prev.legalVerification || []),
+          {
+            documentName: customItemModal.title.trim(),
+            category: 'Custom',
+            verifiedStatus: customItemModal.status || 'Verified',
+            verificationNote: (customItemModal.note || '').trim() || 'Audited clearance on record',
+            isCustomItem: true
+          }
+        ]
+      }));
+    }
+    setCustomItemModal(prev => ({ ...prev, isOpen: false }));
   };
 
   // File Upload Handlers
@@ -801,7 +843,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   // Save Property Form Submit
   const handleSavePropertySubmit = async (e) => {
-    e.preventDefault();
+    if (e && typeof e.preventDefault === 'function') e.preventDefault();
+    if (formStep < 4) {
+      setFormStep(prev => Math.min(prev + 1, 4));
+      return;
+    }
     const isLand = formData.category === 'Land/Plot';
     const parsedImages = formData.galleryImagesStr
       ? formData.galleryImagesStr.split('\n').map(s => s.trim()).filter(Boolean)
@@ -867,6 +913,13 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       advocateVerificationAvailable: Boolean(formData.advocateVerificationAvailable),
       isFeatured: Boolean(formData.isFeatured),
       status: formData.status || 'Active',
+      advocateAudit: formData.advocateAudit || {
+        parentDeedAudit: (formData.legalVerification || []).some(d => /parent|title\s*deed/i.test(d.documentName || '') && (d.verifiedStatus === 'Verified' || d.verifiedStatus === 'cleared')) ? 'Cleared' : 'Pending',
+        encumbranceCertificate: (formData.legalVerification || []).some(d => /encumbrance|\bEC\b/i.test(d.documentName || '') && (d.verifiedStatus === 'Verified' || d.verifiedStatus === 'cleared')) ? 'Nil EC verified' : 'Pending',
+        revenueRtcCompliance: (formData.legalVerification || []).some(d => /mutation|rtc|pahani|khata/i.test(d.documentName || '') && (d.verifiedStatus === 'Verified' || d.verifiedStatus === 'cleared')) ? 'Verified' : 'Pending',
+        mccPlanApprovals: (formData.legalVerification || []).some(d => /sanction|mcc|plan|occupancy|\bOC\b/i.test(d.documentName || '') && (d.verifiedStatus === 'Verified' || d.verifiedStatus === 'cleared')) ? 'Compliant' : 'Pending',
+        dgpsSurveyVerification: (formData.legalVerification || []).some(d => /survey|fmb|dgps|boundary/i.test(d.documentName || '') && (d.verifiedStatus === 'Verified' || d.verifiedStatus === 'cleared')) ? 'Cleared' : 'Pending'
+      },
 
       // Synchronize backward-compatibility fields
       location: `${formData.locality}, ${formData.city}`,
@@ -892,22 +945,29 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         const res = await updateProperty(editingPropertyId, propertyPayload);
         const updatedDoc = res?.data || propertyPayload;
         setProperties(prev => prev.map(p => (String(p._id || p.id) === String(editingPropertyId) ? { ...p, ...propertyPayload, ...updatedDoc } : p)));
+        window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
         alert(`Listing #${editingPropertyId} (${propertyPayload.title}) updated successfully!`);
       } else {
         const res = await createProperty(propertyPayload);
         const newRecord = res?.data || { ...propertyPayload, _id: String(Date.now()), id: String(Date.now()) };
         setProperties(prev => [newRecord, ...prev]);
+        window.dispatchEvent(new CustomEvent('grabmykey_property_created', { detail: newRecord }));
+        window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
         alert(`New property listing "${newRecord.title}" published live to catalog!`);
       }
     } catch (err) {
-      console.warn('API sync warning, saving locally:', err.message);
-      if (editingPropertyId) {
-        setProperties(prev => prev.map(p => (String(p._id || p.id) === String(editingPropertyId) ? { ...p, ...propertyPayload } : p)));
-        alert(`Listing #${editingPropertyId} updated locally!`);
+      console.error('API submission error:', err);
+      const isServerOffline = !err.response && (
+        err.name === 'TypeError' ||
+        err.message?.includes('Network Error') ||
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('ECONNREFUSED') ||
+        err.message?.includes('connection refused')
+      );
+      if (isServerOffline) {
+        alert("Backend server is offline. Please start Node server on port 5000.");
       } else {
-        const fallback = { ...propertyPayload, _id: String(Date.now()), id: String(Date.now()) };
-        setProperties(prev => [fallback, ...prev]);
-        alert(`New property listing published locally!`);
+        alert(`Submission error: ${err.message || 'Could not connect to backend server'}`);
       }
     } finally {
       // Clear editing ID and form state so future creates don't overwrite or duplicate
@@ -941,7 +1001,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   // Calculated Valuation Aggregate for Overview View
   const totalValuationCr = useMemo(() => {
-    const totalRaw = properties.reduce((acc, curr) => acc + (curr.priceRaw || 25000000), 0);
+    const totalRaw = properties.reduce((acc, curr) => {
+      const price = curr.priceRaw || curr.expectedPrice || curr.pricing?.expectedPrice || 0;
+      return acc + price;
+    }, 0);
     return (totalRaw / 10000000).toFixed(2);
   }, [properties]);
 
@@ -953,6 +1016,119 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       counts[type] = (counts[type] || 0) + 1;
     });
     return counts;
+  }, [properties]);
+
+  // Dynamic Title Clearance Ratio & Statutory Advocate Due Diligence Metrics
+  const complianceData = useMemo(() => {
+    if (!properties || properties.length === 0) {
+      return {
+        hasProperties: false,
+        titleClearanceRatio: 0,
+        titleClearanceRatioFormatted: '0%',
+        metrics: [
+          { label: '30-Year Parent Deed Chain Audit', status: 'No active audits', pct: 0 },
+          { label: '30-Year Encumbrance Certificates (Nil EC)', status: 'No active audits', pct: 0 },
+          { label: 'Revenue RTC / Mutation Compliance', status: 'No active audits', pct: 0 },
+          { label: 'MCC / Local Body Plan Approvals', status: 'No active audits', pct: 0 },
+          { label: 'Physical Boundary DGPS Surveys', status: 'No active audits', pct: 0 }
+        ]
+      };
+    }
+
+    const checkDocVerified = (prop, regex, auditKey) => {
+      // 1. Direct check in advocateAudit object
+      if (prop.advocateAudit && auditKey && prop.advocateAudit[auditKey]) {
+        const val = String(prop.advocateAudit[auditKey]).toLowerCase();
+        if (val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || prop.advocateAudit[auditKey] === true) {
+          return true;
+        }
+        if (val === 'pending' || val === 'false') {
+          return false;
+        }
+      }
+
+      // 2. Check in legalVerification matrix
+      if (Array.isArray(prop.legalVerification) && prop.legalVerification.length > 0) {
+        const doc = prop.legalVerification.find(d => regex.test(d.documentName || d.title || d.verificationNote || ''));
+        if (doc) {
+          const s = (doc.verifiedStatus || doc.status || '').toLowerCase();
+          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || doc.isVerified === true;
+        }
+      }
+      return prop.advocateVerificationAvailable === true;
+    };
+
+    // Calculate individual audit metric clearance counts
+    const parentDeedCount = properties.filter(p => checkDocVerified(p, /parent|title\s*deed/i, 'parentDeedAudit')).length;
+    const encumbranceCount = properties.filter(p => checkDocVerified(p, /encumbrance|\bEC\b/i, 'encumbranceCertificate')).length;
+    const revenueRtcCount = properties.filter(p => checkDocVerified(p, /mutation|rtc|pahani|khata/i, 'revenueRtcCompliance')).length;
+    const mccPlanCount = properties.filter(p => checkDocVerified(p, /sanction|mcc|plan|occupancy|\bOC\b/i, 'mccPlanApprovals')).length;
+    const dgpsSurveyCount = properties.filter(p => checkDocVerified(p, /survey|fmb|dgps|boundary/i, 'dgpsSurveyVerification')).length;
+
+    const parentDeedPct = Math.round((parentDeedCount / properties.length) * 100);
+    const encumbrancePct = Math.round((encumbranceCount / properties.length) * 100);
+    const revenueRtcPct = Math.round((revenueRtcCount / properties.length) * 100);
+    const mccPlanPct = Math.round((mccPlanCount / properties.length) * 100);
+    const dgpsSurveyPct = Math.round((dgpsSurveyCount / properties.length) * 100);
+
+    // Calculate overall Title Clearance Ratio across active properties
+    const totalRatioSum = properties.reduce((sum, p) => {
+      if (p.advocateAudit && typeof p.advocateAudit === 'object' && Object.keys(p.advocateAudit).length > 0) {
+        const auditKeys = ['parentDeedAudit', 'encumbranceCertificate', 'revenueRtcCompliance', 'mccPlanApprovals', 'dgpsSurveyVerification'];
+        const passedCount = auditKeys.filter(k => {
+          const val = String(p.advocateAudit[k] || '').toLowerCase();
+          return val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || p.advocateAudit[k] === true;
+        }).length;
+        return sum + (passedCount / auditKeys.length);
+      }
+      if (Array.isArray(p.legalVerification) && p.legalVerification.length > 0) {
+        const verifiedCount = p.legalVerification.filter(d => {
+          const s = (d.verifiedStatus || d.status || '').toLowerCase();
+          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || d.isVerified === true;
+        }).length;
+        return sum + (verifiedCount / p.legalVerification.length);
+      }
+      return sum + (p.advocateVerificationAvailable ? 1 : 0);
+    }, 0);
+
+    const rawAvg = (totalRatioSum / properties.length) * 100;
+    const titleClearanceRatio = Math.round(rawAvg * 10) / 10;
+    const titleClearanceRatioFormatted = titleClearanceRatio % 1 === 0
+      ? `${titleClearanceRatio}%`
+      : `${titleClearanceRatio.toFixed(1)}%`;
+
+    return {
+      hasProperties: true,
+      titleClearanceRatio,
+      titleClearanceRatioFormatted,
+      metrics: [
+        {
+          label: '30-Year Parent Deed Chain Audit',
+          status: parentDeedPct > 0 ? `✓ ${parentDeedPct}% Cleared` : '0% Cleared',
+          pct: parentDeedPct
+        },
+        {
+          label: '30-Year Encumbrance Certificates (Nil EC)',
+          status: encumbrancePct > 0 ? `✓ ${encumbrancePct}% Cleared` : '0% Cleared',
+          pct: encumbrancePct
+        },
+        {
+          label: 'Revenue RTC / Mutation Compliance',
+          status: revenueRtcPct > 0 ? `✓ ${revenueRtcPct}% Verified` : '0% Verified',
+          pct: revenueRtcPct
+        },
+        {
+          label: 'MCC / Local Body Plan Approvals',
+          status: mccPlanPct > 0 ? `✓ ${mccPlanPct}% Compliant` : '0% Compliant',
+          pct: mccPlanPct
+        },
+        {
+          label: 'Physical Boundary DGPS Surveys',
+          status: dgpsSurveyPct > 0 ? `✓ ${dgpsSurveyPct}% Cleared` : '0% Cleared',
+          pct: dgpsSurveyPct
+        }
+      ]
+    };
   }, [properties]);
 
   return (
@@ -1026,7 +1202,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                     </div>
                     <div>
                       <span className="text-2xl font-serif font-bold text-[#0a1d37]">{properties.length} Properties</span>
-                      <span className="block text-xs text-emerald-700 mt-1 font-semibold">100% Verified in catalog</span>
+                      <span className={`block text-xs mt-1 font-semibold ${properties.length === 0 ? 'text-slate-400' : 'text-emerald-700'}`}>
+                        {properties.length === 0 ? '0 active listings in catalog' : '100% Verified in catalog'}
+                      </span>
                     </div>
                   </div>
 
@@ -1064,15 +1242,29 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                   <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-3">
                       <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Title Clearance Ratio</span>
-                      <div className="w-9 h-9 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-700 flex items-center justify-center shadow-xs">
+                      <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-xs ${
+                        complianceData.hasProperties
+                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                          : 'bg-slate-100 border border-slate-200 text-slate-500'
+                      }`}>
                         <ShieldCheck className="w-4 h-4" />
                       </div>
                     </div>
                     <div>
-                      <span className="text-2xl font-serif font-bold text-emerald-800">97.4%</span>
-                      <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-emerald-200">
-                        Advocate panel audited title
+                      <span className={`text-2xl font-serif font-bold ${
+                        complianceData.hasProperties ? 'text-emerald-800' : 'text-slate-400'
+                      }`}>
+                        {complianceData.titleClearanceRatioFormatted}
                       </span>
+                      {complianceData.hasProperties ? (
+                        <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-emerald-200">
+                          Advocate panel audited title
+                        </span>
+                      ) : (
+                        <span className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-slate-200">
+                          No active audits
+                        </span>
+                      )}
                     </div>
                   </div>
                 </div>
@@ -1127,23 +1319,28 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                           <h3 className="font-serif font-bold text-base text-[#0a1d37]">Advocate Due Diligence Health</h3>
                           <p className="text-[11px] text-slate-500">Statutory audit compliance across active listings</p>
                         </div>
-                        <div className="flex items-center space-x-1 text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-semibold">
-                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                          <span>High Court Aligned</span>
-                        </div>
+                        {complianceData.hasProperties ? (
+                          <div className="flex items-center space-x-1 text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-semibold">
+                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                            <span>High Court Aligned</span>
+                          </div>
+                        ) : (
+                          <div className="flex items-center space-x-1 text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full text-xs font-semibold">
+                            <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
+                            <span>No active audits</span>
+                          </div>
+                        )}
                       </div>
 
                       <div className="space-y-3">
-                        {[
-                          { label: '30-Year Parent Deed Chain Audit', status: '✓ 100% Cleared' },
-                          { label: '30-Year Encumbrance Certificates (Nil EC)', status: '✓ 100% Cleared' },
-                          { label: 'Revenue RTC / Mutation Compliance', status: '✓ 98% Verified' },
-                          { label: 'MCC / Local Body Plan Approvals', status: '✓ 95% Compliant' },
-                          { label: 'Physical Boundary DGPS Surveys', status: '✓ 97% Cleared' }
-                        ].map(metric => (
+                        {complianceData.metrics.map(metric => (
                           <div key={metric.label} className="p-3 bg-[#fbf9f5] rounded-xl border border-slate-200 flex items-center justify-between text-xs">
                             <span className="text-[#0a1d37] font-semibold">{metric.label}</span>
-                            <span className="bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold px-3 py-1 rounded-full text-xs font-mono shadow-2xs">
+                            <span className={`font-bold px-3 py-1 rounded-full text-xs font-mono shadow-2xs ${
+                              metric.pct > 0 && complianceData.hasProperties
+                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                                : 'bg-slate-100 text-slate-500 border border-slate-200'
+                            }`}>
                               {metric.status}
                             </span>
                           </div>
@@ -1699,14 +1896,17 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                               </span>
                             </div>
                             <div>
-                              <label className="block text-xs font-bold text-[#0a1d37] mb-1.5">Monthly Maintenance (₹)</label>
+                              <label className="block text-xs font-bold text-[#0a1d37] mb-1.5">Monthly Maintenance (RWA / Society Fee)</label>
                               <input
                                 type="number"
-                                placeholder="12000"
+                                placeholder="0"
                                 value={formData.maintenanceFee}
                                 onChange={e => setFormData({ ...formData, maintenanceFee: e.target.value })}
                                 className="w-full bg-white border border-slate-300 rounded-xl px-3 py-2.5 text-xs text-[#0a1d37] focus:border-[#b8860b] focus:outline-none"
                               />
+                              <span className="text-[10px] text-slate-500 mt-1 block">
+                                Enter monthly society/RWA fee. Set to ₹0 if standalone independent property.
+                              </span>
                             </div>
                             <div className="flex flex-col justify-center">
                               <span className="text-xs font-bold text-[#0a1d37] mb-2">Price Negotiation</span>
@@ -2525,7 +2725,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                         {formStep < 4 ? (
                           <button
                             type="button"
-                            onClick={() => setFormStep(formStep + 1)}
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setFormStep(prev => Math.min(prev + 1, 4));
+                            }}
                             className="bg-slate-900 hover:bg-slate-800 text-white px-6 py-2.5 rounded-lg text-xs font-semibold shadow-sm transition-all cursor-pointer border border-slate-800"
                           >
                             Next Step →
@@ -3372,6 +3576,88 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           </div>
         </div>
       )}
+
+      {/* Reusable Custom Item Modal (Zero Native Browser prompt() Dialogs) */}
+      <AddCustomItemModal
+        isOpen={customItemModal.isOpen}
+        onClose={() => setCustomItemModal(prev => ({ ...prev, isOpen: false }))}
+        title={customItemModal.type === 'FEATURE' ? `Add Feature to ${customItemModal.categoryName || 'Category'}` : 'Add Custom Statutory Legal Check'}
+        subtitle={customItemModal.type === 'FEATURE' ? 'Configure custom architectural, fixture, or amenity specification.' : 'Configure statutory clearance, municipal approval, or environmental NOC document.'}
+        onSubmit={handleConfirmCustomModal}
+        submitLabel={customItemModal.type === 'FEATURE' ? 'Add Feature' : 'Add Legal Check'}
+      >
+        {customItemModal.type === 'FEATURE' ? (
+          <>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                Feature / Amenity Title <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Italian Botticino Marble Flooring, Private Plunge Pool"
+                value={customItemModal.title}
+                onChange={e => setCustomItemModal(prev => ({ ...prev, title: e.target.value }))}
+                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                Specification / Description Note <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. Imported 20mm slab, anti-skid polished finish"
+                value={customItemModal.note}
+                onChange={e => setCustomItemModal(prev => ({ ...prev, note: e.target.value }))}
+                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none"
+              />
+            </div>
+          </>
+        ) : (
+          <>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                Document / Statutory Clearance Title <span className="text-red-500">*</span>
+              </label>
+              <input
+                type="text"
+                required
+                placeholder="e.g. Coastal Regulation Zone (CRZ) Clearance"
+                value={customItemModal.title}
+                onChange={e => setCustomItemModal(prev => ({ ...prev, title: e.target.value }))}
+                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                Initial Verification Status
+              </label>
+              <select
+                value={customItemModal.status}
+                onChange={e => setCustomItemModal(prev => ({ ...prev, status: e.target.value }))}
+                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none cursor-pointer"
+              >
+                <option value="Verified">Verified (Compliant on record)</option>
+                <option value="Pending Audit">Pending Audit (Under advocate review)</option>
+                <option value="Not Applicable">Not Applicable (Exempt by zone / type)</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-600 mb-1.5">
+                Audit Reference Note <span className="text-slate-400 font-normal">(Optional)</span>
+              </label>
+              <input
+                type="text"
+                placeholder="e.g. NOC ref #CRZ-2024-8849 issued by CZMA"
+                value={customItemModal.note}
+                onChange={e => setCustomItemModal(prev => ({ ...prev, note: e.target.value }))}
+                className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none"
+              />
+            </div>
+          </>
+        )}
+      </AddCustomItemModal>
 
     </div>
   );
