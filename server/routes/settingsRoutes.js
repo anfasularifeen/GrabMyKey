@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import SiteSettings from '../models/SiteSettings.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -42,8 +43,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// PUT /api/settings - Update site settings
-router.put('/', async (req, res) => {
+// PUT /api/settings - Update site settings (Admin only)
+router.put('/', requireAdminAuth, async (req, res) => {
   try {
     const { 
       heroFeaturedPropertyId, 

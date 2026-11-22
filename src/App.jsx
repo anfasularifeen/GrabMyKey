@@ -1,30 +1,27 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import AdminConsole from './AdminConsole';
+import AdminLogin from './pages/AdminLogin';
+import AdminSignup from './pages/AdminSignup';
 import PropertyDetails from './components/PropertyDetails';
 import LegalStandards from './pages/LegalStandards';
 import Contact from './pages/Contact';
 import ListProperty from './pages/ListProperty';
 import Footer from './components/Footer';
-import Home, { HeroSection } from './pages/Home';
+import Home from './pages/Home';
 import Properties from './pages/Properties';
 import { useProperties } from './context/PropertyContext';
-import { 
-  Search, Video, MapPin, Phone, 
-  Play, CheckCircle2, ChevronRight, X, 
-  Lock, ExternalLink, Layers, Sparkles,
-  FileCheck, ArrowLeft, Calendar,
-  RefreshCw, Zap, Droplet,
-  Plane, Car, Train, Bus, HeartPulse, GraduationCap, TrendingUp,
-  Bed, Bath, Sofa, Utensils, Building2, Plus
-} from 'lucide-react';
+import { Phone, Loader2 } from 'lucide-react';
 import { 
   fetchProperties, 
   fetchPropertyById,
   fetchLeads, 
   submitLead, 
   checkServerHealth,
-  fetchSiteSettings
+  fetchSiteSettings,
+  adminLogout,
+  adminVerifyToken,
+  getStoredAdminToken
 } from './api';
 
 
@@ -128,46 +125,44 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Admin authentication state
+  // Global property inventory & loading context
+  const { properties, setProperties, isLoading, setIsLoading } = useProperties();
+
+  // Admin authentication state based strictly on verified JWT token
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('adminToken') === 'true';
+      return Boolean(localStorage.getItem('gmk_admin_jwt'));
     }
     return false;
   });
 
   // URL route parsing for unified browser navigation
   const currentPath = location.pathname;
-  const isAdminRoute = currentPath.startsWith('/manage-345') || currentPath === '/admin' || currentPath.startsWith('/admin/');
+  const isAdminLoginRoute = currentPath === '/admin/login';
+  const isAdminSignupRoute = currentPath === '/admin/signup';
+  const isAdminConsoleRoute = (currentPath === '/admin' || currentPath.startsWith('/admin/') || currentPath.startsWith('/manage-345')) && !isAdminLoginRoute && !isAdminSignupRoute;
   const isPropertyDetailRoute = currentPath.startsWith('/property/');
   const propertyIdFromUrl = isPropertyDetailRoute ? currentPath.replace(/^\/property\//, '').split('/')[0] : null;
 
   // View state derived from URL
   const activeView = useMemo(() => {
-    if (isAdminRoute) return 'admin';
+    if (isAdminLoginRoute) return 'admin-login';
+    if (isAdminSignupRoute) return 'admin-signup';
+    if (isAdminConsoleRoute) return 'admin';
     if (isPropertyDetailRoute) return 'property-detail';
     if (currentPath === '/properties') return 'properties';
     if (currentPath === '/legal' || currentPath === '/legal-standards') return 'legal';
     if (currentPath === '/contact') return 'contact';
     if (currentPath === '/sell') return 'sell';
     return 'home';
-  }, [currentPath, isAdminRoute, isPropertyDetailRoute]);
+  }, [currentPath, isAdminLoginRoute, isAdminSignupRoute, isAdminConsoleRoute, isPropertyDetailRoute]);
 
-  const { properties, setProperties } = useProperties();
-  const [selectedPropertyId, setSelectedPropertyId] = useState(() => propertyIdFromUrl || "1");
+  // Local state for property viewing, gallery navigation, and catalog filtering
+  const [selectedPropertyId, setSelectedPropertyId] = useState(propertyIdFromUrl || null);
   const [activeGalleryIdx, setActiveGalleryIdx] = useState(0);
-
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Search and filter states
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedType, setSelectedType] = useState('All');
-
-  // Admin PIN Gate modal
-  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
-  const [adminPin, setAdminPin] = useState('');
-  const [adminPinError, setAdminPinError] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Site Settings (Hero Featured Video & Content)
   const [heroSettings, setHeroSettings] = useState({
@@ -239,19 +234,46 @@ export default function App() {
     }
   }, [propertyIdFromUrl, properties, setProperties]);
 
-  // Check admin auth state when visiting admin routes
+  // Enforce strict admin auth state when visiting admin console routes
   useEffect(() => {
-    if (isAdminRoute) {
-      if (localStorage.getItem('adminToken') !== 'true') {
-        setShowAdminLoginModal(true);
-      } else {
-        setIsAdminLoggedIn(true);
+    const token = getStoredAdminToken();
+
+    if (isAdminConsoleRoute) {
+      if (!token) {
+        setIsAdminLoggedIn(false);
+        navigate('/admin/login', { replace: true });
+        return;
       }
+
+      // Verify token with backend
+      adminVerifyToken()
+        .then(() => {
+          setIsAdminLoggedIn(true);
+        })
+        .catch(() => {
+          setIsAdminLoggedIn(false);
+          navigate('/admin/login', { replace: true });
+        });
+    } else if (token) {
+      setIsAdminLoggedIn(true);
     } else {
-      setShowAdminLoginModal(false);
-      setAdminPinError(false);
+      setIsAdminLoggedIn(false);
     }
-  }, [isAdminRoute]);
+  }, [isAdminConsoleRoute, location.pathname, navigate]);
+
+  // Handle automatic logout on 401 Unauthorized API responses
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setIsAdminLoggedIn(false);
+      if (isAdminConsoleRoute) {
+        navigate('/admin/login', { replace: true });
+      }
+    };
+    window.addEventListener('grabmykey_admin_unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('grabmykey_admin_unauthorized', handleUnauthorized);
+    };
+  }, [isAdminConsoleRoute, navigate]);
 
   // Scroll to top on route change
   useEffect(() => {
@@ -266,10 +288,10 @@ export default function App() {
     const handleKeyDown = (e) => {
       if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
-        if (localStorage.getItem('adminToken') === 'true') {
+        if (getStoredAdminToken()) {
           navigate('/manage-345');
         } else {
-          setShowAdminLoginModal(true);
+          navigate('/admin/login');
         }
       }
     };
@@ -294,12 +316,14 @@ export default function App() {
     };
     window.addEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
     window.addEventListener('grabmykey_property_created', handlePropertiesUpdated);
+    window.addEventListener('grabmykey_property_deleted', handlePropertiesUpdated);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('grabmykey_settings_updated', handleSettingsUpdated);
       window.removeEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
       window.removeEventListener('grabmykey_property_created', handlePropertiesUpdated);
+      window.removeEventListener('grabmykey_property_deleted', handlePropertiesUpdated);
     };
   }, [navigate]);
 
@@ -314,26 +338,10 @@ export default function App() {
     navigate(`/property/${idOrSlug}`);
   };
 
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (adminPin.trim() === '345' || adminPin.trim() === '1234') {
-      setIsAdminLoggedIn(true);
-      localStorage.setItem('adminToken', 'true');
-      setShowAdminLoginModal(false);
-      setAdminPin('');
-      setAdminPinError(false);
-      if (!location.pathname.startsWith('/manage-345')) {
-        navigate('/manage-345');
-      }
-    } else {
-      setAdminPinError(true);
-    }
-  };
-
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
+    await adminLogout();
     setIsAdminLoggedIn(false);
-    localStorage.removeItem('adminToken');
-    navigate('/');
+    navigate('/admin/login');
   };
 
   // 1. Safe Optional Chaining Guard for Hero & Gallery References
@@ -437,7 +445,7 @@ export default function App() {
     if (heroYoutubeId) {
       return `https://img.youtube.com/vi/${heroYoutubeId}/maxresdefault.jpg`;
     }
-    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
+    return heroFeaturedProperty?.coverImage || heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
   }, [heroYoutubeId, heroFeaturedProperty]);
 
   const heroTitle = heroSettings?.heroOverlayTitle || heroFeaturedProperty?.title || "";
@@ -470,10 +478,38 @@ export default function App() {
 
 
   // =========================================================================
-  // VIEW 1: EXECUTIVE ADMIN SUITE (/manage-345 & /manage-345/publish-listing)
-  // Strictly isolated from public storefront layout
+  // VIEW: ADMIN LOGIN PAGE (/admin/login)
   // =========================================================================
-  if (isAdminRoute) {
+  if (isAdminLoginRoute) {
+    return (
+      <AdminLogin
+        onLoginSuccess={() => {
+          setIsAdminLoggedIn(true);
+          navigate('/manage-345');
+        }}
+      />
+    );
+  }
+
+  // =========================================================================
+  // VIEW: ADMIN SIGNUP PAGE (/admin/signup)
+  // =========================================================================
+  if (isAdminSignupRoute) {
+    return (
+      <AdminSignup
+        onSignupSuccess={() => {
+          setIsAdminLoggedIn(true);
+          navigate('/manage-345');
+        }}
+      />
+    );
+  }
+
+  // =========================================================================
+  // VIEW: EXECUTIVE ADMIN SUITE (/manage-345 & /admin/*)
+  // Strictly protected by verified JWT session token
+  // =========================================================================
+  if (isAdminConsoleRoute) {
     if (isAdminLoggedIn) {
       return (
         <AdminConsole
@@ -487,53 +523,10 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-[#060d19] text-slate-100 flex items-center justify-center p-4">
-        <div className="bg-[#0b1528] border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
-          <button 
-            onClick={() => navigate('/')}
-            className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Return to Public Storefront"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-slate-900 text-[#d4af37] border border-slate-700 flex items-center justify-center mx-auto mb-3 shadow-md">
-              <Lock className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-serif font-bold text-white tracking-wide">Executive Command Center</h3>
-            <p className="text-xs text-slate-400 mt-1">Authorized personnel only (PIN: 345)</p>
-          </div>
-
-          <form onSubmit={handleAdminLogin} className="space-y-4">
-            <div>
-              <input 
-                type="password"
-                placeholder="Enter PIN"
-                value={adminPin}
-                onChange={(e) => setAdminPin(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-white font-semibold focus:border-[#d4af37] focus:outline-none transition-colors"
-                autoFocus
-              />
-              {adminPinError && (
-                <p className="text-red-400 text-xs text-center mt-2 font-medium">Incorrect security PIN code. Try 345.</p>
-              )}
-            </div>
-
-            <button 
-              type="submit"
-              className="w-full bg-gradient-to-r from-[#b8860b] to-[#d4af37] hover:brightness-110 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer"
-            >
-              Authenticate & Enter
-            </button>
-            <button 
-              type="button"
-              onClick={() => navigate('/')}
-              className="w-full text-center text-xs text-slate-400 hover:text-white transition-colors cursor-pointer mt-2"
-            >
-              ← Return to Public Storefront
-            </button>
-          </form>
+      <div className="min-h-screen bg-[#070D18] flex items-center justify-center p-4">
+        <div className="text-center space-y-3">
+          <Loader2 className="w-8 h-8 text-[#C59B27] animate-spin mx-auto" />
+          <p className="text-xs font-mono text-slate-400">Verifying administrative security token...</p>
         </div>
       </div>
     );
@@ -691,60 +684,6 @@ export default function App() {
         )}
 
       </main>
-
-      {/* =================================================================== */}
-      {/* ADMIN PIN AUTHENTICATION MODAL (PIN: 345)                           */}
-      {/* =================================================================== */}
-      {showAdminLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 relative shadow-2xl border border-slate-200">
-            <button 
-              onClick={() => {
-                setShowAdminLoginModal(false);
-                setAdminPin('');
-                setAdminPinError(false);
-                if (location.pathname.startsWith('/manage-345')) {
-                  navigateTo('/');
-                }
-              }}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 rounded-full bg-amber-50 text-[#b8860b] border border-amber-200 flex items-center justify-center mx-auto mb-3">
-                <Lock className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-serif text-[#0a1d37]">Private Admin Portal</h3>
-              <p className="text-xs text-slate-500 mt-1">Enter your admin PIN (PIN: 345)</p>
-            </div>
-
-            <form onSubmit={handleAdminLogin} className="space-y-4">
-              <div>
-                <input 
-                  type="password"
-                  placeholder="Enter PIN"
-                  value={adminPin}
-                  onChange={(e) => setAdminPin(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-[#0a1d37] font-semibold focus:border-[#b8860b] focus:outline-none"
-                  autoFocus
-                />
-                {adminPinError && (
-                  <p className="text-red-600 text-xs text-center mt-2 font-medium">Incorrect PIN code. Try 345.</p>
-                )}
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full bg-[#0a1d37] hover:bg-[#061426] text-white border border-[#b8860b]/30 hover:border-[#b8860b] font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer"
-              >
-                Authenticate Access
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
 
       {/* FOOTER - Hidden on property detail view so page ends cleanly above the fixed bottom bar */}
       {activeView !== 'property-detail' && <Footer />}

@@ -2,31 +2,50 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import propertyRoutes from './routes/propertyRoutes.js';
 import leadRoutes from './routes/leadRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import presetRoutes from './routes/presetRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/grabmykey';
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/grabmykey';
 
-// Middleware
+// Parse CLIENT_URL from process.env (supports comma-separated origins)
+const envClientUrls = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map(u => u.trim()).filter(Boolean)
+  : [];
+
+// Allowed Origins for Development & Production Environments
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
-  'http://127.0.0.1:4173'
+  'http://127.0.0.1:4173',
+  'https://grabmykey.in',
+  'https://www.grabmykey.in',
+  ...envClientUrls
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    if (
+      allowedOrigins.indexOf(origin) !== -1 ||
+      origin.endsWith('.grabmykey.in') ||
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:')
+    ) {
       return callback(null, true);
     }
     return callback(null, true);
@@ -53,8 +72,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Serve static uploads if written
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Request logger
 app.use((req, res, next) => {
@@ -63,6 +85,7 @@ app.use((req, res, next) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -115,15 +138,15 @@ const startServer = async () => {
     await mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 5000
     });
-    console.log(` Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
+    console.log(`Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
   } catch (err) {
-    console.warn(`⚠️ MongoDB connection warning: ${err.message}`);
-    console.warn('ℹ️ Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    console.warn(`[MongoDB Warning] ${err.message}`);
+    console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✨ GrabMyKey Express Backend active on http://0.0.0.0:${PORT} (Network: http://192.168.1.7:${PORT})`);
-    console.log(`📡 Endpoints: http://192.168.1.7:${PORT}/api/properties | http://192.168.1.7:${PORT}/api/leads`);
+    console.log(`GrabMyKey Express Backend active on http://0.0.0.0:${PORT} (Network: http://192.168.1.7:${PORT})`);
+    console.log(`Endpoints: http://192.168.1.7:${PORT}/api/properties | http://192.168.1.7:${PORT}/api/leads`);
   });
 };
 

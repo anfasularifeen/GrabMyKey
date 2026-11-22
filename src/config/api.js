@@ -19,14 +19,19 @@ export const getApiBaseUrl = () => {
     }
   }
 
-  // Support local network IP testing from mobile devices or other computers on LAN
-  if (
-    typeof window !== 'undefined' &&
-    window.location?.hostname &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1'
-  ) {
-    return `http://${window.location.hostname}:5000/api`;
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, protocol } = window.location;
+
+    // Production domain (HTTPS or grabmykey.in domain)
+    if (protocol === 'https:' || hostname.includes('grabmykey.in')) {
+      return '/api';
+    }
+
+    // Support local network IP testing from mobile devices or other computers on LAN
+    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    if (isIpAddress && hostname !== '127.0.0.1') {
+      return `http://${hostname}:5000/api`;
+    }
   }
 
   return 'http://localhost:5000/api';

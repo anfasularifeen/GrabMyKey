@@ -13,7 +13,7 @@ export default function PropertyCard({ property = null }) {
   const propDescription = property.description || '';
 
   // Image handling from live backend records (zero static fallbacks)
-  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
+  const propImage = property.coverImage || property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
 
   // Price formatting
   const propPrice = property.price || (

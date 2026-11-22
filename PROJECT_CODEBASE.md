@@ -1,5 +1,5 @@
 # GrabMyKey Complete Codebase Export
-> Generated on: 11/12/2026, 12:10:36 AM
+> Generated on: 11/14/2026, 12:07:11 PM
 
 ---
 
@@ -279,9 +279,12 @@ export default defineConfig({
   "dependencies": {
     "autoprefixer": "^10.6.1",
     "axios": "^1.20.0",
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.11.0",
     "cors": "^2.8.6",
     "dotenv": "^18.0.9",
     "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
     "lucide-react": "^1.61.0",
     "mongoose": "^9.11.4",
     "postcss": "^8.5.31",
@@ -430,7 +433,7 @@ function scanAndBuildMarkdown(dirPath, markdownLines = []) {
 }
 
 function generateCodebaseMarkdown() {
-  console.log('📦 Bundling codebase into PROJECT_CODEBASE.md...');
+  console.log('[EXPORT] Bundling codebase into PROJECT_CODEBASE.md...');
   
   const header = [
     `# GrabMyKey Complete Codebase Export`,
@@ -440,7 +443,7 @@ function generateCodebaseMarkdown() {
 
   const lines = scanAndBuildMarkdown(ROOT_DIR, header);
   fs.writeFileSync(OUTPUT_FILE, lines.join('\n'), 'utf-8');
-  console.log(`✅ Codebase successfully exported to: ${OUTPUT_FILE}`);
+  console.log(`[SUCCESS] Codebase successfully exported to: ${OUTPUT_FILE}`);
 }
 
 generateCodebaseMarkdown();
@@ -669,6 +672,248 @@ if (healthScore === 100) {
 
 ```
 
+## File: `server/config/cloudinary.js`
+
+```javascript
+import { v2 as cloudinary } from 'cloudinary';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const cloudName = process.env.CLOUDINARY_CLOUD_NAME;
+const apiKey = process.env.CLOUDINARY_API_KEY;
+const apiSecret = process.env.CLOUDINARY_API_SECRET;
+
+const isConfigured = Boolean(
+  cloudName &&
+  apiKey &&
+  apiSecret &&
+  cloudName !== 'your_cloud_name_here' &&
+  apiKey !== 'your_api_key_here' &&
+  apiSecret !== 'your_api_secret_here' &&
+  !cloudName.includes('your_cloud_name')
+);
+
+if (isConfigured) {
+  cloudinary.config({
+    cloud_name: cloudName,
+    api_key: apiKey,
+    api_secret: apiSecret,
+    secure: true
+  });
+  console.log(`[Cloudinary] Persistent cloud image storage initialized for: ${cloudName}`);
+} else {
+  console.log('[Cloudinary] Offline / unconfigured mode: Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, and CLOUDINARY_API_SECRET in server/.env for cloud uploads.');
+}
+
+/**
+ * Upload single image (base64 data URL, local path, or remote URL) to Cloudinary.
+ * Returns permanent secure HTTPS URL, or original string if Cloudinary is not configured.
+ */
+export const uploadImageToCloudinary = async (imageInput, folder = 'grabmykey/properties') => {
+  if (!imageInput || typeof imageInput !== 'string') return imageInput;
+
+  // If already an external HTTPS/HTTP URL (not base64 data URL), keep it
+  if (!imageInput.startsWith('data:image/') && imageInput.startsWith('http')) {
+    return imageInput;
+  }
+
+  // Graceful fallback if Cloudinary is not configured yet
+  if (!isConfigured) {
+    return imageInput;
+  }
+
+  try {
+    const result = await cloudinary.uploader.upload(imageInput, {
+      folder,
+      resource_type: 'image',
+      transformation: [
+        { quality: 'auto:good', fetch_format: 'auto' }
+      ]
+    });
+    return result.secure_url;
+  } catch (err) {
+    console.error('[Cloudinary Upload Error]:', err.message);
+    return imageInput;
+  }
+};
+
+/**
+ * Upload an array of images to Cloudinary in parallel
+ */
+export const uploadImagesToCloudinary = async (imagesArray, folder = 'grabmykey/properties') => {
+  if (!Array.isArray(imagesArray)) return [];
+  return Promise.all(imagesArray.map(img => uploadImageToCloudinary(img, folder)));
+};
+
+/**
+ * Extract Cloudinary public_id from a secure URL
+ * Example: https://res.cloudinary.com/cloudname/image/upload/v12345/grabmykey/properties/sample.jpg
+ * Returns: grabmykey/properties/sample
+ */
+export const extractPublicId = (url) => {
+  if (!url || typeof url !== 'string' || !url.includes('res.cloudinary.com')) return null;
+  try {
+    const matches = url.match(/\/upload\/(?:v\d+\/)?([^.]+)/);
+    return matches ? matches[1] : null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Delete image from Cloudinary by public ID or URL
+ */
+export const deleteImageFromCloudinary = async (urlOrPublicId) => {
+  if (!isConfigured || !urlOrPublicId) return;
+  try {
+    const publicId = urlOrPublicId.includes('http') ? extractPublicId(urlOrPublicId) : urlOrPublicId;
+    if (publicId) {
+      await cloudinary.uploader.destroy(publicId);
+      console.log(`[Cloudinary] Removed deleted property image: ${publicId}`);
+    }
+  } catch (err) {
+    console.warn('[Cloudinary Delete Warning]:', err.message);
+  }
+};
+
+/**
+ * Delete multiple images from Cloudinary
+ */
+export const deleteImagesFromCloudinary = async (urlsArray) => {
+  if (!isConfigured || !Array.isArray(urlsArray)) return;
+  await Promise.all(urlsArray.map(url => deleteImageFromCloudinary(url)));
+};
+
+export default cloudinary;
+
+```
+
+## File: `server/middleware/authMiddleware.js`
+
+```javascript
+import jwt from 'jsonwebtoken';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'grabmykey_luxury_real_estate_jwt_secret_key_2026';
+
+/**
+ * Strict Admin Authentication Middleware
+ * Requires a valid, non-expired JWT token in Authorization header.
+ * Returns 401 Unauthorized if missing or invalid.
+ */
+export const requireAdminAuth = (req, res, next) => {
+  try {
+    const authHeader = req.headers.authorization || req.headers.Authorization;
+    let token = null;
+
+    if (authHeader && typeof authHeader === 'string') {
+      if (authHeader.startsWith('Bearer ')) {
+        token = authHeader.substring(7).trim();
+      } else {
+        token = authHeader.trim();
+      }
+    } else if (req.headers['x-auth-token']) {
+      token = String(req.headers['x-auth-token']).trim();
+    }
+
+    if (!token) {
+      return res.status(401).json({
+        success: false,
+        message: 'Access denied: Admin authentication token required',
+        code: 'AUTH_TOKEN_REQUIRED'
+      });
+    }
+
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.admin = decoded;
+    next();
+  } catch (err) {
+    const isExpired = err.name === 'TokenExpiredError';
+    return res.status(401).json({
+      success: false,
+      message: isExpired
+        ? 'Administrative session has expired. Please log in again.'
+        : 'Invalid or forged authentication token.',
+      code: isExpired ? 'AUTH_TOKEN_EXPIRED' : 'AUTH_TOKEN_INVALID',
+      error: err.message
+    });
+  }
+};
+
+export default requireAdminAuth;
+
+
+```
+
+## File: `server/models/Admin.js`
+
+```javascript
+import mongoose from 'mongoose';
+import bcrypt from 'bcryptjs';
+
+const AdminSchema = new mongoose.Schema({
+  name: {
+    type: String,
+    required: [true, 'Admin name is required'],
+    trim: true
+  },
+  email: {
+    type: String,
+    required: [true, 'Admin email is required'],
+    unique: true,
+    lowercase: true,
+    trim: true,
+    match: [/^\S+@\S+\.\S+$/, 'Please provide a valid administrative email address']
+  },
+  password: {
+    type: String,
+    required: [true, 'Admin password is required'],
+    minlength: [8, 'Password must be at least 8 characters long']
+  },
+  role: {
+    type: String,
+    enum: ['admin', 'superadmin'],
+    default: 'admin'
+  },
+  lastLogin: {
+    type: Date,
+    default: null
+  }
+}, {
+  timestamps: true,
+  toJSON: {
+    transform: function (doc, ret) {
+      ret.id = ret._id.toString();
+      delete ret.password;
+      delete ret.__v;
+      return ret;
+    }
+  }
+});
+
+// Pre-save password hashing hook
+AdminSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
+  const salt = await bcrypt.genSalt(10);
+  this.password = await bcrypt.hash(this.password, salt);
+});
+
+// Password verification method
+AdminSchema.methods.comparePassword = async function (candidatePassword) {
+  if (!candidatePassword || !this.password) return false;
+  return bcrypt.compare(candidatePassword, this.password);
+};
+
+const Admin = mongoose.models.Admin || mongoose.model('Admin', AdminSchema);
+
+export default Admin;
+
+
+```
+
 ## File: `server/models/Lead.js`
 
 ```javascript
@@ -777,7 +1022,7 @@ import mongoose from 'mongoose';
 const ComponentItemSchema = new mongoose.Schema({
   categoryName: { type: String, required: true }, // e.g., "Interior & Living", "Building & Security"
   featureName: { type: String, required: true },  // e.g., "Modular Kitchen", "Power Backup"
-  isAvailable: { type: Boolean, default: false },  // true = ✓, false = —
+  isAvailable: { type: Boolean, default: false },  // true = Included, false = Not Included
   status: { type: String, default: 'Not Included' },
   descriptionNote: { type: String, default: "" } // e.g., "Teak finish with Faber chimney"
 }, { _id: true });
@@ -785,11 +1030,10 @@ const ComponentItemSchema = new mongoose.Schema({
 // 2. Dynamic Legal Audit Item Schema
 const LegalAuditItemSchema = new mongoose.Schema({
   documentName: { type: String, required: true }, // e.g., "Encumbrance Certificate (EC)", "Khata / Possession"
-  category: { type: String, default: 'General Title' }, // "Ownership", "Municipal", "Tax", "Custom"
-  verifiedStatus: { 
-    type: String, 
-    enum: ['Verified', 'Pending', 'Issue Flagged', 'Not Applicable'], 
-    default: 'Pending' 
+  category: {
+    type: String,
+    enum: ['Verified', 'Pending', 'Issue Flagged', 'Not Applicable'],
+    default: 'Pending'
   },
   verificationNote: { type: String, default: "" }, // e.g., "30-Year Clear EC verified via Kaveri portal"
   verifiedDate: { type: Date, default: Date.now },
@@ -799,10 +1043,10 @@ const LegalAuditItemSchema = new mongoose.Schema({
 // 3. Dynamic Manual Strategic Transit & Infrastructure Item Schema
 const TransitItemSchema = new mongoose.Schema({
   landmarkName: { type: String, required: true },
-  travelMode: { 
-    type: String, 
-    enum: ['Walk', 'Drive', 'Transit', 'Flight'], 
-    default: 'Drive' 
+  travelMode: {
+    type: String,
+    enum: ['Walk', 'Drive', 'Transit', 'Flight'],
+    default: 'Drive'
   },
   distanceText: { type: String, required: true },
   durationText: { type: String, required: true },
@@ -827,17 +1071,18 @@ const legalChecklistItemSchema = new mongoose.Schema({
 const PropertySchema = new mongoose.Schema({
   _id: { type: mongoose.Schema.Types.Mixed },
   id: { type: String },
+  listingCode: { type: String, trim: true },
   title: { type: String, required: true, trim: true },
   slug: { type: String, required: true, unique: true, trim: true },
   city: { type: String, enum: ['Mangaluru'], default: 'Mangaluru', required: true },
   locality: { type: String, required: true, trim: true },
-  category: { 
-    type: String, 
-    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'], 
-    required: true 
+  category: {
+    type: String,
+    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'],
+    required: true
   },
   dealType: { type: String, enum: ['Resale', 'Rental', 'New Launch', 'Direct Sale'], required: true, default: 'Resale' },
-  
+
   pricing: {
     expectedPrice: { type: Number, default: 0 },
     isNegotiable: { type: Boolean, default: false },
@@ -848,8 +1093,8 @@ const PropertySchema = new mongoose.Schema({
     bedrooms: { type: Number, default: 0 },
     bathrooms: { type: Number, default: 0 },
     carpetAreaSqFt: { type: Number, default: 0 },
-    furnishingStatus: { 
-      type: String, 
+    furnishingStatus: {
+      type: String,
       enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished', 'Furnished'],
       default: 'Unfurnished'
     },
@@ -858,6 +1103,7 @@ const PropertySchema = new mongoose.Schema({
   },
 
   youtubeVideoId: { type: String, default: '' },
+  coverImage: { type: String, default: '' },
   galleryImages: { type: [String], default: [] },
   description: { type: String, default: '' },
 
@@ -933,6 +1179,17 @@ const formatInrPrice = (amount) => {
 
 // Auto-sync backward compatibility and new schema fields before saving
 PropertySchema.pre('save', function () {
+  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-345)
+  if (!this.listingCode) {
+    if (this._id) {
+      const idStr = String(this._id).replace(/[^a-zA-Z0-9]/g, '');
+      const shortId = idStr.slice(-4).toUpperCase();
+      this.listingCode = `GMK-MLR-${shortId || Math.floor(100 + Math.random() * 900)}`;
+    } else {
+      this.listingCode = `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+    }
+  }
+
   // Generate slug if absent
   if (!this.slug && this.title) {
     this.slug = this.title
@@ -1025,11 +1282,20 @@ PropertySchema.pre('save', function () {
     this.area = `${this.carpetArea} sq.ft`;
   }
 
-  // Sync images and galleryImages
-  if ((!this.galleryImages || this.galleryImages.length === 0) && Array.isArray(this.images) && this.images.length > 0) {
-    this.galleryImages = [...this.images];
+  // Sync images, galleryImages and coverImage
+  if (!this.coverImage && Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
+    this.coverImage = this.galleryImages[0];
   }
-  if ((!this.images || this.images.length === 0) && Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
+  if (!this.coverImage && Array.isArray(this.images) && this.images.length > 0) {
+    this.coverImage = this.images[0];
+  }
+  if (this.coverImage) {
+    const list = Array.isArray(this.galleryImages) ? this.galleryImages : [];
+    this.images = [this.coverImage, ...list.filter(img => img !== this.coverImage)];
+    if (!this.galleryImages || this.galleryImages.length === 0) {
+      this.galleryImages = [...this.images];
+    }
+  } else if (Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
     this.images = [...this.galleryImages];
   }
 
@@ -1095,8 +1361,230 @@ export default mongoose.models.SiteSettings || mongoose.model('SiteSettings', Si
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js"
+  },
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.6",
+    "dotenv": "^18.0.9",
+    "express": "^5.3.0",
+    "jsonwebtoken": "^9.0.3",
+    "mongoose": "^9.11.4"
   }
 }
+
+
+```
+
+## File: `server/routes/authRoutes.js`
+
+```javascript
+import express from 'express';
+import jwt from 'jsonwebtoken';
+import Admin from '../models/Admin.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
+import dotenv from 'dotenv';
+
+dotenv.config();
+
+const router = express.Router();
+const JWT_SECRET = process.env.JWT_SECRET || 'grabmykey_luxury_real_estate_jwt_secret_key_2026';
+const ADMIN_INVITE_KEY = process.env.ADMIN_INVITE_KEY || 'GMK-ADMIN-2026';
+
+// Helper to generate a signed JWT token (7-day validity)
+const generateToken = (admin) => {
+  return jwt.sign(
+    {
+      id: admin._id || admin.id,
+      name: admin.name,
+      email: admin.email,
+      role: admin.role || 'admin'
+    },
+    JWT_SECRET,
+    { expiresIn: '7d' }
+  );
+};
+
+/**
+ * POST /api/auth/signup
+ * Register a new administrative user with an authorized invite key
+ */
+router.post('/signup', async (req, res) => {
+  try {
+    const { name, email, password, inviteKey } = req.body;
+
+    if (!name || !name.trim()) {
+      return res.status(400).json({ success: false, message: 'Full name is required.' });
+    }
+    if (!email || !email.trim()) {
+      return res.status(400).json({ success: false, message: 'Valid email address is required.' });
+    }
+    if (!password || password.length < 8) {
+      return res.status(400).json({ success: false, message: 'Password must be at least 8 characters long.' });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+
+    // Check if any admin already exists in the system
+    const adminCount = await Admin.countDocuments();
+
+    // If admins already exist, strictly verify the administrative invite key
+    if (adminCount > 0) {
+      if (!inviteKey || inviteKey.trim() !== ADMIN_INVITE_KEY) {
+        return res.status(403).json({
+          success: false,
+          message: 'Invalid administrative invite key. Contact your system superadmin for authorization.'
+        });
+      }
+    }
+
+    // Check if email is already taken
+    const existing = await Admin.findOne({ email: normalizedEmail });
+    if (existing) {
+      return res.status(409).json({
+        success: false,
+        message: 'An administrator account with this email address already exists.'
+      });
+    }
+
+    // Create the new administrator (the first one is superadmin)
+    const newAdmin = await Admin.create({
+      name: name.trim(),
+      email: normalizedEmail,
+      password,
+      role: adminCount === 0 ? 'superadmin' : 'admin',
+      lastLogin: new Date()
+    });
+
+    const token = generateToken(newAdmin);
+
+    res.status(201).json({
+      success: true,
+      message: 'Administrator account registered successfully.',
+      token,
+      admin: {
+        id: newAdmin._id,
+        name: newAdmin.name,
+        email: newAdmin.email,
+        role: newAdmin.role
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Signup Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to create administrative account.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/auth/login
+ * Authenticate administrator with email and password
+ */
+router.post('/login', async (req, res) => {
+  try {
+    const { email, password } = req.body;
+
+    if (!email || !email.trim() || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'Administrative email and password are required.'
+      });
+    }
+
+    const normalizedEmail = email.trim().toLowerCase();
+    const admin = await Admin.findOne({ email: normalizedEmail });
+
+    if (!admin) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid administrative credentials.'
+      });
+    }
+
+    const isMatch = await admin.comparePassword(password);
+    if (!isMatch) {
+      return res.status(401).json({
+        success: false,
+        message: 'Invalid administrative credentials.'
+      });
+    }
+
+    // Update last login timestamp
+    admin.lastLogin = new Date();
+    await admin.save();
+
+    const token = generateToken(admin);
+
+    res.status(200).json({
+      success: true,
+      message: 'Administrative authentication successful.',
+      token,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Login Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Authentication service encountered an error.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/auth/me
+ * Verify current JWT token and return active admin profile
+ */
+router.get('/me', requireAdminAuth, async (req, res) => {
+  try {
+    const admin = await Admin.findById(req.admin.id).select('-password');
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator profile not found.'
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        lastLogin: admin.lastLogin
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Me Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve administrative profile.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * POST /api/auth/logout
+ */
+router.post('/logout', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Administrative session ended successfully.'
+  });
+});
+
+export default router;
+
 
 ```
 
@@ -1106,13 +1594,14 @@ export default mongoose.models.SiteSettings || mongoose.model('SiteSettings', Si
 import express from 'express';
 import mongoose from 'mongoose';
 import Lead from '../models/Lead.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 let memoryLeads = [];
 
 // GET /api/leads - Fetch all seller requests (Admin only)
-router.get('/', async (req, res) => {
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.json({
@@ -1202,8 +1691,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/leads/:id - Update lead status
-router.patch('/:id', async (req, res) => {
+// PATCH /api/leads/:id - Update lead status (Admin only)
+router.patch('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { status } = req.body;
 
@@ -1251,7 +1740,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 // DELETE /api/leads/:id - Delete lead (Admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       memoryLeads = memoryLeads.filter(l => String(l._id) !== String(req.params.id) && String(l.id) !== String(req.params.id));
@@ -1294,6 +1783,7 @@ export default router;
 import express from 'express';
 import mongoose from 'mongoose';
 import MasterPreset from '../models/MasterPreset.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -1800,8 +2290,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/presets - Create a new preset
-router.post('/', async (req, res) => {
+// POST /api/presets - Create a new preset (Admin only)
+router.post('/', requireAdminAuth, async (req, res) => {
   try {
     const {
       presetType,
@@ -1862,8 +2352,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/presets/:id - Update an existing preset
-router.put('/:id', async (req, res) => {
+// PUT /api/presets/:id - Update an existing preset (Admin only)
+router.put('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
@@ -1911,8 +2401,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/presets/:id - Delete a preset
-router.delete('/:id', async (req, res) => {
+// DELETE /api/presets/:id - Delete a preset (Admin only)
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -1951,8 +2441,8 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// POST /api/presets/seed-defaults - Force reset to default presets
-router.post('/seed-defaults', async (req, res) => {
+// POST /api/presets/seed-defaults - Force reset to default presets (Admin only)
+router.post('/seed-defaults', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       await MasterPreset.deleteMany({});
@@ -2000,6 +2490,8 @@ import mongoose from 'mongoose';
 import Property from '../models/Property.js';
 import MasterPreset from '../models/MasterPreset.js';
 import { getActiveMasterPresets } from './presetRoutes.js';
+import { uploadImageToCloudinary, uploadImagesToCloudinary, deleteImagesFromCloudinary } from '../config/cloudinary.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -2018,8 +2510,8 @@ export const seedInitialProperties = async () => {
  * display the new item.
  * 
  * Default Fallbacks:
- * - Feature Specifications: isAvailable: false ("— Not Included") & descriptionNote: "Status Not Updated"
- * - Legal Verification: verifiedStatus: 'Pending' ("⏳ Pending") & verificationNote: "Pending Audit / Status Not Updated"
+ * - Feature Specifications: isAvailable: false ("Not Included") & descriptionNote: "Status Not Updated"
+ * - Legal Verification: verifiedStatus: 'Pending' ("Pending") & verificationNote: "Pending Audit / Status Not Updated"
  * - Preserves all previously recorded property-specific states, custom features, and custom legal items!
  */
 export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = []) => {
@@ -2138,6 +2630,11 @@ export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = [])
   property.id = resolvedId;
   property._id = property._id || resolvedId;
   property.slug = property.slug || resolvedId;
+  if (!property.listingCode) {
+    const idStr = String(property._id || property.id || '').replace(/[^a-zA-Z0-9]/g, '');
+    const shortId = idStr.slice(-4).toUpperCase();
+    property.listingCode = `GMK-MLR-${shortId || '101'}`;
+  }
   property.city = property.city || 'Mangaluru';
   property.locality = property.locality || (property.location ? property.location.split(',')[0].trim() : 'Surathkal Beach');
   property.location = property.location || `${property.locality}, ${property.city}`;
@@ -2460,9 +2957,20 @@ export const createPropertyHandler = async (req, res) => {
 
     const isLand = (body.category === 'Land/Plot' || body.category === 'Plot' || body.type === 'Plot');
 
+    const listingCode = body.listingCode || `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+    const rawGalleryImages = Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
+      ? body.galleryImages 
+      : (Array.isArray(body.images) ? body.images : []);
+    const rawCoverImage = body.coverImage || (rawGalleryImages.length > 0 ? rawGalleryImages[0] : '');
+
+    // Upload to Cloudinary (stores permanent secure HTTPS URLs, or original strings if offline)
+    const coverImage = await uploadImageToCloudinary(rawCoverImage, 'grabmykey/properties');
+    const galleryImages = await uploadImagesToCloudinary(rawGalleryImages, 'grabmykey/properties');
+
     const propertyPayload = {
       title,
       slug,
+      listingCode,
       city: 'Mangaluru',
       locality: body.locality || (body.location ? body.location.split(',')[0].trim() : 'Central'),
       category: body.category || body.type || 'Villa',
@@ -2481,9 +2989,8 @@ export const createPropertyHandler = async (req, res) => {
         totalFloors: body.specs?.totalFloors || '1'
       },
       youtubeVideoId: body.youtubeVideoId?.trim() || (body.videoUrl?.includes('v=') ? body.videoUrl.split('v=')[1]?.substring(0, 11) : (body.videoUrl?.includes('youtu.be/') ? body.videoUrl.split('youtu.be/')[1]?.substring(0, 11) : '')) || '',
-      galleryImages: Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
-        ? body.galleryImages 
-        : (Array.isArray(body.images) ? body.images : []),
+      coverImage,
+      galleryImages,
       description: body.description || '',
       componentsMatrix: Array.isArray(body.componentsMatrix) ? body.componentsMatrix : [],
       legalVerification,
@@ -2516,7 +3023,9 @@ export const createPropertyHandler = async (req, res) => {
       baths: isLand ? 0 : Number(body.baths ?? body.specs?.bathrooms ?? 0),
       area: body.area || (body.specs?.carpetAreaSqFt ? `${body.specs.carpetAreaSqFt} sq.ft` : body.carpetArea || ''),
       videoUrl: body.videoUrl || body.heroVideoUrl || (body.youtubeVideoId ? `https://www.youtube.com/watch?v=${body.youtubeVideoId}` : ''),
-      images: Array.isArray(body.images) ? body.images : (Array.isArray(body.galleryImages) ? body.galleryImages : []),
+      images: coverImage
+        ? [coverImage, ...galleryImages.filter(img => img !== coverImage)]
+        : galleryImages,
       badge: body.badge || 'Verified Listing',
       legalStatus: body.legalStatus || 'Clear Title / RERA Verified',
       highlights: Array.isArray(body.highlights) && body.highlights.length > 0 ? body.highlights : [
@@ -2570,8 +3079,8 @@ export const createPropertyHandler = async (req, res) => {
   }
 };
 
-router.post('/', createPropertyHandler);
-router.post('/properties', createPropertyHandler);
+router.post('/', requireAdminAuth, createPropertyHandler);
+router.post('/properties', requireAdminAuth, createPropertyHandler);
 
 // Controller: updateProperty
 export const updateProperty = async (req, res) => {
@@ -2581,6 +3090,24 @@ export const updateProperty = async (req, res) => {
     // Sanitize payload: prevent modifying immutable _id in MongoDB
     const updateData = { ...req.body };
     delete updateData._id;
+
+    // Upload any updated/new base64 images to Cloudinary
+    if (updateData.coverImage) {
+      updateData.coverImage = await uploadImageToCloudinary(updateData.coverImage, 'grabmykey/properties');
+    }
+    if (Array.isArray(updateData.galleryImages) && updateData.galleryImages.length > 0) {
+      updateData.galleryImages = await uploadImagesToCloudinary(updateData.galleryImages, 'grabmykey/properties');
+    }
+    // Synchronize updateData.images with uploaded coverImage and galleryImages to prevent raw base64 or desynchronization
+    if (updateData.coverImage || updateData.galleryImages) {
+      const activeCover = updateData.coverImage || '';
+      const activeGallery = Array.isArray(updateData.galleryImages) ? updateData.galleryImages : [];
+      updateData.images = activeCover
+        ? [activeCover, ...activeGallery.filter(img => img !== activeCover)]
+        : activeGallery;
+    } else if (Array.isArray(updateData.images) && updateData.images.length > 0) {
+      updateData.images = await uploadImagesToCloudinary(updateData.images, 'grabmykey/properties');
+    }
 
     if (Array.isArray(updateData.transitMatrix)) {
       updateData.transitMatrix = updateData.transitMatrix.map(t => ({
@@ -2698,26 +3225,70 @@ export const updateProperty = async (req, res) => {
 };
 
 // PUT /api/properties/:id - Update property listing (Admin only)
-router.put('/:id', updateProperty);
+router.put('/:id', requireAdminAuth, updateProperty);
 
 // PUT /api/properties/manage/:id - Alias update route
-router.put('/manage/:id', updateProperty);
+router.put('/manage/:id', requireAdminAuth, updateProperty);
 
 // DELETE /api/properties/:id - Remove listing (Admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
-    const deleted = await Property.findByIdAndDelete(req.params.id);
+    const identifier = req.params.id;
+    let deleted = null;
+
+    if (mongoose.connection.readyState === 1) {
+      if (mongoose.Types.ObjectId.isValid(identifier)) {
+        deleted = await Property.findByIdAndDelete(identifier);
+      }
+      if (!deleted) {
+        deleted = await Property.findOneAndDelete({
+          $or: [
+            { slug: identifier },
+            { id: identifier },
+            { listingCode: identifier }
+          ]
+        });
+      }
+    }
+
+    // Also remove from fallback in-memory cache if present
+    const initIdx = INITIAL_PROPERTIES.findIndex(p =>
+      String(p._id) === String(identifier) ||
+      String(p.id) === String(identifier) ||
+      p.slug === identifier ||
+      p.listingCode === identifier
+    );
+    if (initIdx !== -1) {
+      INITIAL_PROPERTIES.splice(initIdx, 1);
+      if (!deleted) {
+        deleted = { _id: identifier };
+      }
+    }
+
     if (!deleted) {
       return res.status(404).json({
         success: false,
-        message: 'Property not found to delete'
+        message: 'Property not found'
       });
     }
 
-    res.json({
+    // Clean up persistent Cloudinary images associated with this property
+    const imagesToDelete = [];
+    if (deleted.coverImage) imagesToDelete.push(deleted.coverImage);
+    if (Array.isArray(deleted.galleryImages)) imagesToDelete.push(...deleted.galleryImages);
+    if (Array.isArray(deleted.images)) imagesToDelete.push(...deleted.images);
+
+    if (imagesToDelete.length > 0) {
+      deleteImagesFromCloudinary(imagesToDelete).catch(err => {
+        console.warn('[Cloudinary Cleanup Warning]:', err.message);
+      });
+    }
+
+    res.status(200).json({
       success: true,
       message: 'Property deleted successfully',
-      data: { id: req.params.id }
+      id: identifier,
+      data: { id: identifier }
     });
   } catch (error) {
     console.error('Error deleting property:', error);
@@ -2739,6 +3310,7 @@ export default router;
 import express from 'express';
 import mongoose from 'mongoose';
 import SiteSettings from '../models/SiteSettings.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -2780,8 +3352,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// PUT /api/settings - Update site settings
-router.put('/', async (req, res) => {
+// PUT /api/settings - Update site settings (Admin only)
+router.put('/', requireAdminAuth, async (req, res) => {
   try {
     const { 
       heroFeaturedPropertyId, 
@@ -2848,31 +3420,50 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import propertyRoutes from './routes/propertyRoutes.js';
 import leadRoutes from './routes/leadRoutes.js';
 import settingsRoutes from './routes/settingsRoutes.js';
 import presetRoutes from './routes/presetRoutes.js';
+import authRoutes from './routes/authRoutes.js';
 
 dotenv.config();
 
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 const app = express();
 const PORT = process.env.PORT || 5000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://127.0.0.1:27017/grabmykey';
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/grabmykey';
 
-// Middleware
+// Parse CLIENT_URL from process.env (supports comma-separated origins)
+const envClientUrls = process.env.CLIENT_URL
+  ? process.env.CLIENT_URL.split(',').map(u => u.trim()).filter(Boolean)
+  : [];
+
+// Allowed Origins for Development & Production Environments
 const allowedOrigins = [
   'http://localhost:5173',
   'http://localhost:5174',
   'http://localhost:4173',
   'http://127.0.0.1:5173',
   'http://127.0.0.1:5174',
-  'http://127.0.0.1:4173'
+  'http://127.0.0.1:4173',
+  'https://grabmykey.in',
+  'https://www.grabmykey.in',
+  ...envClientUrls
 ];
 
 app.use(cors({
   origin: (origin, callback) => {
     if (!origin) return callback(null, true);
-    if (allowedOrigins.indexOf(origin) !== -1 || origin.startsWith('http://localhost:') || origin.startsWith('http://127.0.0.1:')) {
+    if (
+      allowedOrigins.indexOf(origin) !== -1 ||
+      origin.endsWith('.grabmykey.in') ||
+      origin.startsWith('http://localhost:') ||
+      origin.startsWith('http://127.0.0.1:')
+    ) {
       return callback(null, true);
     }
     return callback(null, true);
@@ -2899,8 +3490,11 @@ app.use((req, res, next) => {
   next();
 });
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: true }));
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
+
+// Serve static uploads if written
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Request logger
 app.use((req, res, next) => {
@@ -2909,6 +3503,7 @@ app.use((req, res, next) => {
 });
 
 // API Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/leads', leadRoutes);
 app.use('/api/settings', settingsRoutes);
@@ -2961,15 +3556,15 @@ const startServer = async () => {
     await mongoose.connect(MONGODB_URI, {
       serverSelectionTimeoutMS: 5000
     });
-    console.log(` Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
+    console.log(`Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
   } catch (err) {
-    console.warn(`⚠️ MongoDB connection warning: ${err.message}`);
-    console.warn('ℹ️ Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    console.warn(`[MongoDB Warning] ${err.message}`);
+    console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
   }
 
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`✨ GrabMyKey Express Backend active on http://0.0.0.0:${PORT} (Network: http://192.168.1.7:${PORT})`);
-    console.log(`📡 Endpoints: http://192.168.1.7:${PORT}/api/properties | http://192.168.1.7:${PORT}/api/leads`);
+    console.log(`GrabMyKey Express Backend active on http://0.0.0.0:${PORT} (Network: http://192.168.1.7:${PORT})`);
+    console.log(`Endpoints: http://192.168.1.7:${PORT}/api/properties | http://192.168.1.7:${PORT}/api/leads`);
   });
 };
 
@@ -2987,10 +3582,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Building2, Users, PlusCircle, Trash2, Edit3,
   CheckCircle2, Eye, RefreshCw, Phone, Search, DollarSign,
-  Sparkles, MapPin, X, Check, Save, ArrowLeft, Video, Upload,
+  MapPin, X, Check, Save, ArrowLeft, Video, Upload,
   FileText, ShieldCheck, Layers, Car,
   FileCheck, ArrowUpRight, Play, FolderCog, Tag, Filter,
-  ChevronUp, ChevronDown, Footprints, Train, Plane
+  ChevronUp, ChevronDown, Footprints, Train, Plane,
+  TrendingUp, Image as ImageIcon, Star
 } from 'lucide-react';
 
 import {
@@ -3084,7 +3680,8 @@ const INITIAL_FORM_STATE = {
   floorLevel: 'G+1',
   totalFloors: '2',
   youtubeVideoId: '',
-  galleryImagesStr: '',
+  coverImage: '',
+  galleryImages: [],
   description: '',
   badge: 'Verified Listing',
   isFeatured: false,
@@ -3185,6 +3782,13 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   });
   const [isSavingHeroSettings, setIsSavingHeroSettings] = useState(false);
   const [heroSaveSuccess, setHeroSaveSuccess] = useState(false);
+
+  // Custom Property Delete Confirmation Modal State
+  const [deleteModalState, setDeleteModalState] = useState({
+    isOpen: false,
+    property: null,
+    isDeleting: false
+  });
 
   // Dynamic feature selector based on category and presets (defaults to false / Not Included for new listings)
   const getFeaturesForCategory = (cat, defaultAvailable = false) => {
@@ -3474,9 +4078,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       floorLevel: prop.specs?.floorLevel || 'G',
       totalFloors: prop.specs?.totalFloors || '1',
       youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : ''),
-      galleryImagesStr: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
-        ? prop.galleryImages.join('\n')
-        : (Array.isArray(prop.images) ? prop.images.join('\n') : ''),
+      coverImage: prop.coverImage || (Array.isArray(prop.galleryImages) && prop.galleryImages[0]) || (Array.isArray(prop.images) && prop.images[0]) || '',
+      galleryImages: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
+        ? prop.galleryImages
+        : (Array.isArray(prop.images) ? prop.images : []),
       badge: prop.badge || 'Verified Listing',
       description: prop.description || '',
       isFeatured: prop.isFeatured ?? false,
@@ -3508,16 +4113,87 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     navigate('/manage-345/publish-listing');
   };
 
-  // CRUD Property actions
-  const handleDeleteProperty = async (id) => {
-    if (!window.confirm('Delete this luxury listing from the active catalog? This action is irreversible.')) return;
-    try {
-      await deleteProperty(id);
-    } catch (err) {
-      console.warn('Backend delete error, removing locally:', err.message);
+  // CRUD Property actions & Custom Confirmation Modal
+  const handleRequestDelete = (property) => {
+    setDeleteModalState({
+      isOpen: true,
+      property,
+      isDeleting: false
+    });
+  };
+
+  const handleCloseDeleteModal = () => {
+    if (deleteModalState.isDeleting) return;
+    setDeleteModalState({
+      isOpen: false,
+      property: null,
+      isDeleting: false
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalState.property) return;
+    const target = deleteModalState.property;
+    // Strictly prioritize true MongoDB ObjectId (_id)
+    const targetId = target._id || target.id;
+
+    if (!targetId) {
+      setDeleteModalState(prev => ({
+        ...prev,
+        error: 'Unable to identify property ID for deletion.'
+      }));
+      return;
     }
-    setProperties(prev => prev.filter(p => (p._id || p.id) !== id));
-    if (onDataUpdated) onDataUpdated();
+
+    setDeleteModalState(prev => ({ ...prev, isDeleting: true, error: null }));
+
+    try {
+      // Send DELETE request to Express backend
+      const response = await deleteProperty(targetId);
+
+      // Verify success response
+      if (response && response.success === false) {
+        throw new Error(response.message || 'Server indicated deletion failed');
+      }
+
+      // 1. Immediately remove from frontend state
+      setProperties(prev => prev.filter(p => {
+        const pId = p._id || p.id;
+        return pId !== targetId && String(p._id) !== String(targetId) && String(p.id) !== String(targetId);
+      }));
+
+      // 2. Broadcast live event across all open pages & storefront
+      window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
+      window.dispatchEvent(new CustomEvent('grabmykey_property_deleted', { detail: { id: targetId } }));
+
+      if (onDataUpdated) onDataUpdated();
+
+      // 3. Close modal cleanly
+      setDeleteModalState({
+        isOpen: false,
+        property: null,
+        isDeleting: false,
+        error: null
+      });
+    } catch (err) {
+      console.error('Property deletion failed:', err);
+      const isNetworkErr = !err.response && (
+        err.name === 'TypeError' ||
+        err.message?.includes('Network Error') ||
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('ECONNREFUSED') ||
+        err.message?.includes('connection refused')
+      );
+      const errorMsg = isNetworkErr
+        ? 'Backend server is offline. Please start the Express server on port 5000 to delete listings from MongoDB.'
+        : (err.response?.data?.message || err.message || 'Failed to delete property from database.');
+
+      setDeleteModalState(prev => ({
+        ...prev,
+        isDeleting: false,
+        error: errorMsg
+      }));
+    }
   };
 
   // Lead actions
@@ -3600,7 +4276,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return `https://img.youtube.com/vi/${previewYoutubeId}/maxresdefault.jpg`;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.images?.[0] || '';
+    return prop?.coverImage || prop?.images?.[0] || prop?.galleryImages?.[0] || '';
   }, [previewYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   // Dynamic Car-Style Feature Matrix Handlers
@@ -3809,6 +4485,73 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setCustomItemModal(prev => ({ ...prev, isOpen: false }));
   };
 
+  // Client-Side Canvas Image Compression Helper (Max 1600px width, 0.85 quality)
+  const compressImageFile = (file, maxWidth = 1600, quality = 0.85) => {
+    return new Promise((resolve) => {
+      if (!file || !file.type.startsWith('image/')) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
+          resolve(dataUrl);
+        };
+        img.onerror = () => resolve(e.target.result);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Primary Cover Photo Upload Handlers
+  const handleCoverImageUpload = async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const compressed = await compressImageFile(e.target.files[0]);
+      if (compressed) {
+        setFormData(prev => ({ ...prev, coverImage: compressed }));
+      }
+    }
+  };
+
+  const handleRemoveCoverImage = () => {
+    setFormData(prev => ({ ...prev, coverImage: '' }));
+  };
+
+  // Property Gallery Photos Upload Handlers
+  const handleGalleryImagesUpload = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      const results = await Promise.all(files.map(f => compressImageFile(f)));
+      const valid = results.filter(Boolean);
+      setFormData(prev => ({
+        ...prev,
+        galleryImages: [...(Array.isArray(prev.galleryImages) ? prev.galleryImages : []), ...valid]
+      }));
+    }
+  };
+
+  const handleRemoveGalleryImage = (idx) => {
+    setFormData(prev => ({
+      ...prev,
+      galleryImages: (Array.isArray(prev.galleryImages) ? prev.galleryImages : []).filter((_, i) => i !== idx)
+    }));
+  };
+
   // File Upload Handlers
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -3833,9 +4576,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return;
     }
     const isLand = formData.category === 'Land/Plot';
-    const parsedImages = formData.galleryImagesStr
-      ? formData.galleryImagesStr.split('\n').map(s => s.trim()).filter(Boolean)
-      : [];
+    const resolvedCover = formData.coverImage || (Array.isArray(formData.galleryImages) && formData.galleryImages[0]) || '';
+    const resolvedGallery = Array.isArray(formData.galleryImages) ? formData.galleryImages : [];
+    const orderedImages = resolvedCover
+      ? [resolvedCover, ...resolvedGallery.filter(img => img !== resolvedCover)]
+      : resolvedGallery;
 
     const priceNum = Number(formData.expectedPrice) || 25000000;
     const formatDisplayPrice = (val) => {
@@ -3873,7 +4618,8 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         totalFloors: formData.totalFloors || '1'
       },
       youtubeVideoId: formData.youtubeVideoId?.trim() || '',
-      galleryImages: parsedImages,
+      coverImage: resolvedCover,
+      galleryImages: resolvedGallery,
       description: formData.description,
       componentsMatrix: formData.componentsMatrix || [],
       legalVerification: formData.legalVerification || [],
@@ -3914,7 +4660,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       baths: isLand ? 0 : Number(formData.bathrooms),
       area: `${formData.carpetAreaSqFt} sq.ft`,
       videoUrl: `https://www.youtube.com/watch?v=${formData.youtubeVideoId}`,
-      images: parsedImages,
+      images: orderedImages,
       badge: formData.badge || 'Verified Listing',
       legalStatus: 'Clear Title / RERA Verified',
       highlights: [
@@ -4002,116 +4748,89 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     return counts;
   }, [properties]);
 
-  // Dynamic Title Clearance Ratio & Statutory Advocate Due Diligence Metrics
-  const complianceData = useMemo(() => {
+  // Dynamic Deal Type & Inventory Mix for Overview
+  const dealTypeBreakdown = useMemo(() => {
+    const counts = {
+      'Resale': 0,
+      'New Launch': 0,
+      'Rental / Lease': 0
+    };
+
+    properties.forEach(p => {
+      const dt = (p.dealType || 'Resale').trim();
+      if (dt.toLowerCase().includes('rental') || dt.toLowerCase().includes('lease')) {
+        counts['Rental / Lease'] += 1;
+      } else if (dt.toLowerCase().includes('new') || dt.toLowerCase().includes('launch')) {
+        counts['New Launch'] += 1;
+      } else {
+        counts['Resale'] += 1;
+      }
+    });
+
+    const total = properties.length;
+    return [
+      {
+        type: 'Resale Listings',
+        shortLabel: 'Resale',
+        count: counts['Resale'],
+        pct: total > 0 ? Math.round((counts['Resale'] / total) * 100) : 0,
+        barColor: 'bg-[#0a1d37]'
+      },
+      {
+        type: 'New Launch Developments',
+        shortLabel: 'New Launch',
+        count: counts['New Launch'],
+        pct: total > 0 ? Math.round((counts['New Launch'] / total) * 100) : 0,
+        barColor: 'bg-[#b8860b]'
+      },
+      {
+        type: 'Rental / Lease Units',
+        shortLabel: 'Rental / Lease',
+        count: counts['Rental / Lease'],
+        pct: total > 0 ? Math.round((counts['Rental / Lease'] / total) * 100) : 0,
+        barColor: 'bg-emerald-700'
+      }
+    ];
+  }, [properties]);
+
+  // Dynamic Average Ticket Size (Mean Portfolio Asking Price)
+  const averageTicketSize = useMemo(() => {
     if (!properties || properties.length === 0) {
       return {
-        hasProperties: false,
-        titleClearanceRatio: 0,
-        titleClearanceRatioFormatted: '0%',
-        metrics: [
-          { label: '30-Year Parent Deed Chain Audit', status: 'No active audits', pct: 0 },
-          { label: '30-Year Encumbrance Certificates (Nil EC)', status: 'No active audits', pct: 0 },
-          { label: 'Revenue RTC / Mutation Compliance', status: 'No active audits', pct: 0 },
-          { label: 'MCC / Local Body Plan Approvals', status: 'No active audits', pct: 0 },
-          { label: 'Physical Boundary DGPS Surveys', status: 'No active audits', pct: 0 }
-        ]
+        formatted: '₹0',
+        subtext: 'Mean portfolio asking price'
       };
     }
 
-    const checkDocVerified = (prop, regex, auditKey) => {
-      // 1. Direct check in advocateAudit object
-      if (prop.advocateAudit && auditKey && prop.advocateAudit[auditKey]) {
-        const val = String(prop.advocateAudit[auditKey]).toLowerCase();
-        if (val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || prop.advocateAudit[auditKey] === true) {
-          return true;
-        }
-        if (val === 'pending' || val === 'false') {
-          return false;
-        }
-      }
-
-      // 2. Check in legalVerification matrix
-      if (Array.isArray(prop.legalVerification) && prop.legalVerification.length > 0) {
-        const doc = prop.legalVerification.find(d => regex.test(d.documentName || d.title || d.verificationNote || ''));
-        if (doc) {
-          const s = (doc.verifiedStatus || doc.status || '').toLowerCase();
-          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || doc.isVerified === true;
+    const totalRaw = properties.reduce((acc, curr) => {
+      let price = curr.priceRaw || curr.expectedPrice || curr.pricing?.expectedPrice || 0;
+      if (!price && typeof curr.price === 'string') {
+        const pStr = curr.price.replace(/[^0-9.]/g, '');
+        const num = parseFloat(pStr);
+        if (!isNaN(num)) {
+          if (/cr/i.test(curr.price)) price = num * 10000000;
+          else if (/lakh/i.test(curr.price)) price = num * 100000;
+          else price = num;
         }
       }
-      return prop.advocateVerificationAvailable === true;
-    };
-
-    // Calculate individual audit metric clearance counts
-    const parentDeedCount = properties.filter(p => checkDocVerified(p, /parent|title\s*deed/i, 'parentDeedAudit')).length;
-    const encumbranceCount = properties.filter(p => checkDocVerified(p, /encumbrance|\bEC\b/i, 'encumbranceCertificate')).length;
-    const revenueRtcCount = properties.filter(p => checkDocVerified(p, /mutation|rtc|pahani|khata/i, 'revenueRtcCompliance')).length;
-    const mccPlanCount = properties.filter(p => checkDocVerified(p, /sanction|mcc|plan|occupancy|\bOC\b/i, 'mccPlanApprovals')).length;
-    const dgpsSurveyCount = properties.filter(p => checkDocVerified(p, /survey|fmb|dgps|boundary/i, 'dgpsSurveyVerification')).length;
-
-    const parentDeedPct = Math.round((parentDeedCount / properties.length) * 100);
-    const encumbrancePct = Math.round((encumbranceCount / properties.length) * 100);
-    const revenueRtcPct = Math.round((revenueRtcCount / properties.length) * 100);
-    const mccPlanPct = Math.round((mccPlanCount / properties.length) * 100);
-    const dgpsSurveyPct = Math.round((dgpsSurveyCount / properties.length) * 100);
-
-    // Calculate overall Title Clearance Ratio across active properties
-    const totalRatioSum = properties.reduce((sum, p) => {
-      if (p.advocateAudit && typeof p.advocateAudit === 'object' && Object.keys(p.advocateAudit).length > 0) {
-        const auditKeys = ['parentDeedAudit', 'encumbranceCertificate', 'revenueRtcCompliance', 'mccPlanApprovals', 'dgpsSurveyVerification'];
-        const passedCount = auditKeys.filter(k => {
-          const val = String(p.advocateAudit[k] || '').toLowerCase();
-          return val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || p.advocateAudit[k] === true;
-        }).length;
-        return sum + (passedCount / auditKeys.length);
-      }
-      if (Array.isArray(p.legalVerification) && p.legalVerification.length > 0) {
-        const verifiedCount = p.legalVerification.filter(d => {
-          const s = (d.verifiedStatus || d.status || '').toLowerCase();
-          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || d.isVerified === true;
-        }).length;
-        return sum + (verifiedCount / p.legalVerification.length);
-      }
-      return sum + (p.advocateVerificationAvailable ? 1 : 0);
+      return acc + (Number(price) || 0);
     }, 0);
 
-    const rawAvg = (totalRatioSum / properties.length) * 100;
-    const titleClearanceRatio = Math.round(rawAvg * 10) / 10;
-    const titleClearanceRatioFormatted = titleClearanceRatio % 1 === 0
-      ? `${titleClearanceRatio}%`
-      : `${titleClearanceRatio.toFixed(1)}%`;
+    const avg = totalRaw / properties.length;
+    let formatted = '₹0';
+    if (avg >= 10000000) {
+      const crVal = (avg / 10000000).toFixed(2).replace(/\.00$/, '');
+      formatted = `₹${crVal} Cr`;
+    } else if (avg >= 100000) {
+      const lkVal = (avg / 100000).toFixed(1).replace(/\.0$/, '');
+      formatted = `₹${lkVal} Lakhs`;
+    } else if (avg > 0) {
+      formatted = `₹${Math.round(avg).toLocaleString('en-IN')}`;
+    }
 
     return {
-      hasProperties: true,
-      titleClearanceRatio,
-      titleClearanceRatioFormatted,
-      metrics: [
-        {
-          label: '30-Year Parent Deed Chain Audit',
-          status: parentDeedPct > 0 ? `✓ ${parentDeedPct}% Cleared` : '0% Cleared',
-          pct: parentDeedPct
-        },
-        {
-          label: '30-Year Encumbrance Certificates (Nil EC)',
-          status: encumbrancePct > 0 ? `✓ ${encumbrancePct}% Cleared` : '0% Cleared',
-          pct: encumbrancePct
-        },
-        {
-          label: 'Revenue RTC / Mutation Compliance',
-          status: revenueRtcPct > 0 ? `✓ ${revenueRtcPct}% Verified` : '0% Verified',
-          pct: revenueRtcPct
-        },
-        {
-          label: 'MCC / Local Body Plan Approvals',
-          status: mccPlanPct > 0 ? `✓ ${mccPlanPct}% Compliant` : '0% Compliant',
-          pct: mccPlanPct
-        },
-        {
-          label: 'Physical Boundary DGPS Surveys',
-          status: dgpsSurveyPct > 0 ? `✓ ${dgpsSurveyPct}% Cleared` : '0% Cleared',
-          pct: dgpsSurveyPct
-        }
-      ]
+      formatted,
+      subtext: 'Mean portfolio asking price'
     };
   }, [properties]);
 
@@ -4148,7 +4867,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           <div className="w-full max-w-7xl mx-auto px-8 py-6 space-y-8">
 
             {/* ================================================================= */}
-            {/* VIEW 1: 📊 EXECUTIVE OVERVIEW                                     */}
+            {/* VIEW 1: EXECUTIVE OVERVIEW                                        */}
             {/* ================================================================= */}
             {activeTab === 'overview' && (
               <div className="space-y-8 w-full">
@@ -4156,12 +4875,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                 {/* Header Title */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
                   <div>
-                    <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight flex items-center space-x-2.5">
-                      <span>Executive Operations Overview</span>
-                      <Sparkles className="w-5 h-5 text-[#b8860b]" />
+                    <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight">
+                      Executive Operations Overview
                     </h1>
                     <p className="text-xs text-slate-500 mt-1">
-                      Real-time portfolio metrics, valuation aggregate, and advocate statutory governance.
+                      Real-time portfolio metrics, valuation aggregate, micro-market distribution, and media coverage.
                     </p>
                   </div>
                   <button
@@ -4222,38 +4940,32 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                     </div>
                   </div>
 
-                  {/* 4. Title Clearance Ratio */}
+                  {/* 4. Average Ticket Size */}
                   <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Title Clearance Ratio</span>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Average Ticket Size</span>
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-xs ${
-                        complianceData.hasProperties
-                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                        properties.length > 0
+                          ? 'bg-[#0a1d37] text-[#e6ca65]'
                           : 'bg-slate-100 border border-slate-200 text-slate-500'
                       }`}>
-                        <ShieldCheck className="w-4 h-4" />
+                        <TrendingUp className="w-4 h-4" />
                       </div>
                     </div>
                     <div>
                       <span className={`text-2xl font-serif font-bold ${
-                        complianceData.hasProperties ? 'text-emerald-800' : 'text-slate-400'
+                        properties.length > 0 ? 'text-[#0a1d37]' : 'text-slate-400'
                       }`}>
-                        {complianceData.titleClearanceRatioFormatted}
+                        {averageTicketSize.formatted}
                       </span>
-                      {complianceData.hasProperties ? (
-                        <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-emerald-200">
-                          Advocate panel audited title
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-slate-200">
-                          No active audits
-                        </span>
-                      )}
+                      <span className="block text-xs text-slate-500 mt-1">
+                        {averageTicketSize.subtext}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Visual Charts: Asset Class Distribution & Advocate Due Diligence */}
+                {/* Visual Charts: Asset Class Distribution & Deal Type Mix */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                   {/* Chart 1: Asset Class Distribution (White Card + Soft Slate Bars) */}
@@ -4295,46 +5007,81 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                     </div>
                   </div>
 
-                  {/* Chart 2: Advocate Due Diligence Health (White Card + Green Pill Badges) */}
+                  {/* Chart 2: Deal Type & Inventory Mix + Quick Operational Shortcuts */}
                   <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-5">
                         <div>
-                          <h3 className="font-serif font-bold text-base text-[#0a1d37]">Advocate Due Diligence Health</h3>
-                          <p className="text-[11px] text-slate-500">Statutory audit compliance across active listings</p>
+                          <h3 className="font-serif font-bold text-base text-[#0a1d37]">Deal Type & Inventory Mix</h3>
+                          <p className="text-[11px] text-slate-500">Transaction typology breakdown and operations console</p>
                         </div>
-                        {complianceData.hasProperties ? (
-                          <div className="flex items-center space-x-1 text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-semibold">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>High Court Aligned</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center space-x-1 text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full text-xs font-semibold">
-                            <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-                            <span>No active audits</span>
-                          </div>
-                        )}
+                        <span className="text-xs font-mono text-[#0a1d37] bg-slate-100 px-3 py-1 rounded-full border border-slate-200 font-semibold">
+                          {properties.length} Active Listings
+                        </span>
                       </div>
 
-                      <div className="space-y-3">
-                        {complianceData.metrics.map(metric => (
-                          <div key={metric.label} className="p-3 bg-[#fbf9f5] rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                            <span className="text-[#0a1d37] font-semibold">{metric.label}</span>
-                            <span className={`font-bold px-3 py-1 rounded-full text-xs font-mono shadow-2xs ${
-                              metric.pct > 0 && complianceData.hasProperties
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : 'bg-slate-100 text-slate-500 border border-slate-200'
-                            }`}>
-                              {metric.status}
-                            </span>
+                      {/* Transaction Typology Progress Bars */}
+                      <div className="space-y-3.5 mb-6">
+                        {dealTypeBreakdown.map((item) => (
+                          <div key={item.type} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-[#0a1d37] flex items-center space-x-2">
+                                <span className={`w-2 h-2 rounded-full ${item.barColor}`} />
+                                <span>{item.type}</span>
+                              </span>
+                              <span className="font-mono text-slate-500">{item.count} Units ({item.pct}%)</span>
+                            </div>
+                            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${item.barColor} rounded-full transition-all duration-500`}
+                                style={{ width: `${item.pct}%` }}
+                              />
+                            </div>
                           </div>
                         ))}
+                      </div>
+
+                      {/* Quick Operational Shortcuts */}
+                      <div className="pt-4 border-t border-slate-100">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-2.5">
+                          Quick Actions & Operations
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={handleOpenCreateModal}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-[#0a1d37] hover:bg-[#061426] text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5 text-[#e6ca65]" />
+                            <span>+ Publish New Listing</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTabSwitch('hero')}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#8b6508] border border-amber-200 text-xs font-semibold transition-all cursor-pointer"
+                          >
+                            <Video className="w-3.5 h-3.5 text-[#b8860b]" />
+                            <span>Manage Hero Video</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTabSwitch('leads')}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-semibold transition-all cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Review Owner Leads</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                      <span>Karnataka Land Revenue Laws & MCC Bylaws</span>
-                      <button onClick={() => handleTabSwitch('inventory')} className="text-[#b8860b] hover:text-[#0a1d37] font-bold flex items-center space-x-1 cursor-pointer">
+                      <span>Mangaluru Active Catalog Mix</span>
+                      <button
+                        type="button"
+                        onClick={() => handleTabSwitch('inventory')}
+                        className="text-[#b8860b] hover:text-[#0a1d37] font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                      >
                         <span>Manage All Inventory</span>
                         <ArrowUpRight className="w-3.5 h-3.5" />
                       </button>
@@ -4379,7 +5126,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 2: 🏢 PROPERTY INVENTORY (LIGHT-LUXURY CRUD TABLE)           */}
+            {/* VIEW 2: PROPERTY INVENTORY (LIGHT-LUXURY CRUD TABLE)              */}
             {/* ================================================================= */}
             {activeTab === 'inventory' && (
               <div className="space-y-6 w-full">
@@ -4471,9 +5218,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                               <td className="py-4 px-6">
                                 <div className="flex items-center space-x-3">
                                   <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs flex items-center justify-center">
-                                    {prop.images?.[0] ? (
+                                    {(prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
                                       <img
-                                        src={prop.images[0]}
+                                        src={prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail}
                                         alt={prop.title}
                                         className="w-full h-full object-cover"
                                       />
@@ -4545,7 +5292,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteProperty(prop._id || prop.id)}
+                                    onClick={() => handleRequestDelete(prop)}
                                     className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors cursor-pointer"
                                     title="Delete Property"
                                   >
@@ -4565,7 +5312,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 3: 📩 OWNER LEAD QUEUE (LIGHT-LUXURY TABLE)                  */}
+            {/* VIEW 3: OWNER LEAD QUEUE (LIGHT-LUXURY TABLE)                     */}
             {/* ================================================================= */}
             {activeTab === 'leads' && (
               <div className="space-y-6 w-full">
@@ -4704,7 +5451,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 4: ➕ FULL-BLEED PROPERTY PUBLISHER (LIGHT LUXURY)           */}
+            {/* VIEW 4: FULL-BLEED PROPERTY PUBLISHER (LIGHT LUXURY)              */}
             {/* ================================================================= */}
             {activeTab === 'publish-listing' && (
               <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -5076,18 +5823,179 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                           )}
                         </div>
 
-                        {/* Photo Image URLs string */}
-                        <div>
-                          <label className="block text-xs font-bold text-[#0a1d37] mb-1.5">
-                            Gallery Image URLs (One URL per line)
-                          </label>
-                          <textarea
-                            rows={4}
-                            value={formData.galleryImagesStr}
-                            onChange={e => setFormData({ ...formData, galleryImagesStr: e.target.value })}
-                            placeholder="https://example.com/property-photo.jpg (one URL per line)"
-                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#0a1d37] font-mono focus:border-[#b8860b] focus:outline-none"
-                          />
+                        {/* 1. DEDICATED PRIMARY COVER PHOTO UPLOAD ZONE */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                                Primary Cover Photo <span className="text-red-500">*</span>
+                              </label>
+                              <span className="text-[11px] text-slate-500">
+                                The hero photograph featured on catalog cards, homepage highlights, and page headers (.jpg, .png, .webp).
+                              </span>
+                            </div>
+                            {formData.coverImage && (
+                              <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                                <Check className="w-3 h-3" />
+                                <span>Cover Active</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {formData.coverImage ? (
+                            /* Instant Image Preview Card */
+                            <div className="relative border-2 border-emerald-500/40 bg-white rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+                              <div className="relative w-full sm:w-56 h-36 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                                <img
+                                  src={formData.coverImage}
+                                  alt="Primary Cover Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <span className="absolute top-2 left-2 bg-[#b8860b] text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-sm font-mono flex items-center space-x-1">
+                                  <Star className="w-2.5 h-2.5 fill-current" />
+                                  <span>PRIMARY COVER</span>
+                                </span>
+                              </div>
+                              <div className="flex-1 w-full space-y-2">
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                    Active Catalog Hero
+                                  </span>
+                                  <h4 className="text-sm font-bold text-[#0a1d37] mt-1.5 truncate">
+                                    Primary Listing Cover Photo
+                                  </h4>
+                                  <span className="text-xs text-slate-500 font-mono block mt-0.5">
+                                    Format: High-Resolution Web-Ready Image
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-3 pt-2">
+                                  <label className="inline-flex items-center space-x-1.5 bg-[#f8f6f0] hover:bg-slate-100 text-[#0a1d37] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-300 transition-all">
+                                    <Upload className="w-3.5 h-3.5" />
+                                    <span>Replace Photo</span>
+                                    <input
+                                      type="file"
+                                      accept="image/jpeg,image/png,image/webp"
+                                      onChange={handleCoverImageUpload}
+                                      className="hidden"
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={handleRemoveCoverImage}
+                                    className="inline-flex items-center space-x-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3.5 py-2 rounded-xl text-xs font-semibold border border-red-200 transition-all cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Remove Photo</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Dedicated Single Dropzone */
+                            <div className="border-2 border-dashed border-amber-200/90 hover:border-[#b8860b] rounded-2xl p-6 text-center bg-[#f8f6f0] transition-all group">
+                              <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#b8860b] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                                <ImageIcon className="w-6 h-6" />
+                              </div>
+                              <h5 className="text-xs font-bold text-[#0a1d37] mb-1">
+                                Upload Primary Cover Photo (.jpg, .png, .webp)
+                              </h5>
+                              <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                                Select a single hero photograph to represent this property across catalog cards and headers.
+                              </p>
+                              <label className="inline-flex items-center space-x-2 bg-[#b8860b] hover:bg-[#996515] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#b8860b]/40">
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Select Primary Cover Photo</span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={handleCoverImageUpload}
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 2. DEDICATED PROPERTY GALLERY PHOTOS MULTI-FILE UPLOAD ZONE */}
+                        <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                                Property Gallery Photos
+                              </label>
+                              <span className="text-[11px] text-slate-500">
+                                Upload additional interior, exterior, elevation, and amenity views (.jpg, .png, .webp).
+                              </span>
+                            </div>
+                            {Array.isArray(formData.galleryImages) && formData.galleryImages.length > 0 && (
+                              <span className="text-[11px] font-mono font-bold text-[#b8860b] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                                {formData.galleryImages.length} Photo{formData.galleryImages.length !== 1 ? 's' : ''} Uploaded
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Multi-file Gallery Dropzone */}
+                          <div className="border-2 border-dashed border-slate-300 hover:border-[#0a1d37] rounded-2xl p-6 text-center bg-[#f8f6f0] transition-all group">
+                            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-100 text-[#0a1d37] border border-slate-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                              <Upload className="w-6 h-6" />
+                            </div>
+                            <h5 className="text-xs font-bold text-[#0a1d37] mb-1">
+                              Upload Gallery Photos (.jpg, .png, .webp)
+                            </h5>
+                            <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                              Select multiple photos from your device to populate the property photo gallery carousel.
+                            </p>
+                            <label className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061426] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#0a1d37]/40">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Select Gallery Photos</span>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handleGalleryImagesUpload}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+
+                          {/* Clean Gallery Thumbnails Grid with Individual Remove Buttons */}
+                          {Array.isArray(formData.galleryImages) && formData.galleryImages.length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
+                              {formData.galleryImages.map((imgUrl, idx) => (
+                                <div
+                                  key={idx}
+                                  className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white shadow-2xs hover:border-[#b8860b] transition-all"
+                                >
+                                  <div className="h-24 w-full overflow-hidden bg-slate-100 relative">
+                                    <img
+                                      src={imgUrl}
+                                      alt={`Gallery photo ${idx + 1}`}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveGalleryImage(idx)}
+                                      className="absolute top-1.5 right-1.5 p-1 bg-black/75 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer shadow-sm"
+                                      title="Remove photo"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                  <div className="p-1.5 flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-600 font-medium">Photo #{idx + 1}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFormData(prev => ({ ...prev, coverImage: imgUrl }))}
+                                      className="text-[9px] text-[#b8860b] hover:underline font-semibold cursor-pointer"
+                                      title="Set this image as primary cover"
+                                    >
+                                      Set Cover
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Local File Upload Dropzone */}
@@ -5156,7 +6064,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                 </h3>
                               </div>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                Grouped specifications with availability toggles (✓ / —) and optional custom descriptive notes.
+                                Grouped specifications with availability toggles and optional custom descriptive notes.
                               </p>
                             </div>
                             <div className="flex items-center space-x-2">
@@ -5262,7 +6170,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                               <button
                                                 type="button"
                                                 onClick={() => handleToggleFeature(item.originalIdx)}
-                                                title={isIncluded ? "Click to mark Not Included (—)" : "Click to mark Included (✓)"}
+                                                title={isIncluded ? "Click to mark Not Included" : "Click to mark Included"}
                                                 className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs ${
                                                   isIncluded
                                                     ? 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -5583,10 +6491,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                             'bg-slate-50 border-slate-300 text-slate-700'
                                       }`}
                                   >
-                                    <option value="Verified">✓ Verified (Clean Clear Title)</option>
-                                    <option value="Pending">⏳ Pending Audit</option>
-                                    <option value="Issue Flagged">✕ Issue Flagged / Action Required</option>
-                                    <option value="Not Applicable">— Not Applicable</option>
+                                    <option value="Verified">Verified (Clean Clear Title)</option>
+                                    <option value="Pending">Pending Audit</option>
+                                    <option value="Issue Flagged">Issue Flagged / Action Required</option>
+                                    <option value="Not Applicable">Not Applicable</option>
                                   </select>
                                 </div>
 
@@ -6319,10 +7227,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                     {preset.defaultStatus !== 'Not Available' ? (
                                       <span className="text-emerald-700 font-bold flex items-center space-x-1">
                                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span>✓ Included</span>
+                                        <span>Included</span>
                                       </span>
                                     ) : (
-                                      <span className="text-slate-400 font-medium">— Not Included</span>
+                                      <span className="text-slate-400 font-medium">Not Included</span>
                                     )}
                                   </td>
                                   <td className="py-3.5 px-4 text-slate-600 max-w-xs">
@@ -6470,8 +7378,8 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                       onChange={e => setPresetFormData({ ...presetFormData, defaultStatus: e.target.value })}
                       className="w-full bg-[#f8f6f0] border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-[#b8860b]"
                     >
-                      <option value="Available">✓ Available (Included)</option>
-                      <option value="Not Available">— Not Available</option>
+                      <option value="Available">Available (Included)</option>
+                      <option value="Not Available">Not Available</option>
                     </select>
                   </div>
                 </div>
@@ -6642,6 +7550,93 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           </>
         )}
       </AddCustomItemModal>
+
+      {/* CUSTOM PROPERTY DELETE CONFIRMATION MODAL */}
+      {deleteModalState.isOpen && deleteModalState.property && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-xs">
+          <div className="bg-[#FAF8F5] border border-stone-300 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-[#1A1A1A] animate-in fade-in zoom-in-95 duration-150">
+            {/* Top Close Button */}
+            <button
+              type="button"
+              onClick={handleCloseDeleteModal}
+              disabled={deleteModalState.isDeleting}
+              className="absolute top-4 right-4 text-stone-400 hover:text-[#1A1A1A] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Modal Icon & Header */}
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-red-50 text-red-700 border border-red-200 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-serif font-bold text-[#1A1A1A]">
+                Confirm Property Deletion
+              </h3>
+              <p className="text-xs text-stone-600 mt-1.5 leading-relaxed">
+                Are you sure you want to permanently remove <span className="font-bold text-[#1A1A1A]">"{deleteModalState.property.title}"</span> ({deleteModalState.property.listingCode || deleteModalState.property._id || 'Listing'}) from the active catalog? This action cannot be undone.
+              </p>
+            </div>
+
+            {/* Property Summary Strip */}
+            <div className="bg-white border border-stone-200 rounded-xl p-3 text-xs space-y-1 mb-5">
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Location:</span>
+                <span className="font-semibold text-[#1A1A1A] truncate max-w-[220px]">
+                  {deleteModalState.property.locality || deleteModalState.property.location || 'Mangaluru'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Price:</span>
+                <span className="font-serif font-bold text-[#b8860b]">
+                  {deleteModalState.property.price || 'Price on Request'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Typology:</span>
+                <span className="font-medium text-stone-700">
+                  {deleteModalState.property.type || deleteModalState.property.category || 'Asset'} • {deleteModalState.property.dealType || 'Resale'}
+                </span>
+              </div>
+            </div>
+
+            {/* Error Message if Deletion Failed */}
+            {deleteModalState.error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 font-medium mb-4 flex items-start space-x-2">
+                <span className="font-bold shrink-0">Deletion Blocked:</span>
+                <span>{deleteModalState.error}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={handleCloseDeleteModal}
+                disabled={deleteModalState.isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-[#1A1A1A] text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleteModalState.isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center space-x-1.5 disabled:opacity-50"
+              >
+                {deleteModalState.isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Confirm Deletion</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );
@@ -6845,30 +7840,27 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate, useLocation, Link } from 'react-router-dom';
 import AdminConsole from './AdminConsole';
+import AdminLogin from './pages/AdminLogin';
+import AdminSignup from './pages/AdminSignup';
 import PropertyDetails from './components/PropertyDetails';
 import LegalStandards from './pages/LegalStandards';
 import Contact from './pages/Contact';
 import ListProperty from './pages/ListProperty';
 import Footer from './components/Footer';
-import Home, { HeroSection } from './pages/Home';
+import Home from './pages/Home';
 import Properties from './pages/Properties';
 import { useProperties } from './context/PropertyContext';
-import { 
-  Search, Video, MapPin, Phone, 
-  Play, CheckCircle2, ChevronRight, X, 
-  Lock, ExternalLink, Layers, Sparkles,
-  FileCheck, ArrowLeft, Calendar,
-  RefreshCw, Zap, Droplet,
-  Plane, Car, Train, Bus, HeartPulse, GraduationCap, TrendingUp,
-  Bed, Bath, Sofa, Utensils, Building2, Plus
-} from 'lucide-react';
+import { Phone, Loader2 } from 'lucide-react';
 import { 
   fetchProperties, 
   fetchPropertyById,
   fetchLeads, 
   submitLead, 
   checkServerHealth,
-  fetchSiteSettings
+  fetchSiteSettings,
+  adminLogout,
+  adminVerifyToken,
+  getStoredAdminToken
 } from './api';
 
 
@@ -6972,46 +7964,44 @@ export default function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Admin authentication state
+  // Global property inventory & loading context
+  const { properties, setProperties, isLoading, setIsLoading } = useProperties();
+
+  // Admin authentication state based strictly on verified JWT token
   const [isAdminLoggedIn, setIsAdminLoggedIn] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('adminToken') === 'true';
+      return Boolean(localStorage.getItem('gmk_admin_jwt'));
     }
     return false;
   });
 
   // URL route parsing for unified browser navigation
   const currentPath = location.pathname;
-  const isAdminRoute = currentPath.startsWith('/manage-345') || currentPath === '/admin' || currentPath.startsWith('/admin/');
+  const isAdminLoginRoute = currentPath === '/admin/login';
+  const isAdminSignupRoute = currentPath === '/admin/signup';
+  const isAdminConsoleRoute = (currentPath === '/admin' || currentPath.startsWith('/admin/') || currentPath.startsWith('/manage-345')) && !isAdminLoginRoute && !isAdminSignupRoute;
   const isPropertyDetailRoute = currentPath.startsWith('/property/');
   const propertyIdFromUrl = isPropertyDetailRoute ? currentPath.replace(/^\/property\//, '').split('/')[0] : null;
 
   // View state derived from URL
   const activeView = useMemo(() => {
-    if (isAdminRoute) return 'admin';
+    if (isAdminLoginRoute) return 'admin-login';
+    if (isAdminSignupRoute) return 'admin-signup';
+    if (isAdminConsoleRoute) return 'admin';
     if (isPropertyDetailRoute) return 'property-detail';
     if (currentPath === '/properties') return 'properties';
     if (currentPath === '/legal' || currentPath === '/legal-standards') return 'legal';
     if (currentPath === '/contact') return 'contact';
     if (currentPath === '/sell') return 'sell';
     return 'home';
-  }, [currentPath, isAdminRoute, isPropertyDetailRoute]);
+  }, [currentPath, isAdminLoginRoute, isAdminSignupRoute, isAdminConsoleRoute, isPropertyDetailRoute]);
 
-  const { properties, setProperties } = useProperties();
-  const [selectedPropertyId, setSelectedPropertyId] = useState(() => propertyIdFromUrl || "1");
+  // Local state for property viewing, gallery navigation, and catalog filtering
+  const [selectedPropertyId, setSelectedPropertyId] = useState(propertyIdFromUrl || null);
   const [activeGalleryIdx, setActiveGalleryIdx] = useState(0);
-
-  const [isLoading, setIsLoading] = useState(false);
-
-  // Search and filter states
-  const [searchQuery, setSearchQuery] = useState('');
-  const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedType, setSelectedType] = useState('All');
-
-  // Admin PIN Gate modal
-  const [showAdminLoginModal, setShowAdminLoginModal] = useState(false);
-  const [adminPin, setAdminPin] = useState('');
-  const [adminPinError, setAdminPinError] = useState(false);
+  const [selectedRegion, setSelectedRegion] = useState('All');
+  const [searchQuery, setSearchQuery] = useState('');
 
   // Dynamic Site Settings (Hero Featured Video & Content)
   const [heroSettings, setHeroSettings] = useState({
@@ -7083,19 +8073,46 @@ export default function App() {
     }
   }, [propertyIdFromUrl, properties, setProperties]);
 
-  // Check admin auth state when visiting admin routes
+  // Enforce strict admin auth state when visiting admin console routes
   useEffect(() => {
-    if (isAdminRoute) {
-      if (localStorage.getItem('adminToken') !== 'true') {
-        setShowAdminLoginModal(true);
-      } else {
-        setIsAdminLoggedIn(true);
+    const token = getStoredAdminToken();
+
+    if (isAdminConsoleRoute) {
+      if (!token) {
+        setIsAdminLoggedIn(false);
+        navigate('/admin/login', { replace: true });
+        return;
       }
+
+      // Verify token with backend
+      adminVerifyToken()
+        .then(() => {
+          setIsAdminLoggedIn(true);
+        })
+        .catch(() => {
+          setIsAdminLoggedIn(false);
+          navigate('/admin/login', { replace: true });
+        });
+    } else if (token) {
+      setIsAdminLoggedIn(true);
     } else {
-      setShowAdminLoginModal(false);
-      setAdminPinError(false);
+      setIsAdminLoggedIn(false);
     }
-  }, [isAdminRoute]);
+  }, [isAdminConsoleRoute, location.pathname, navigate]);
+
+  // Handle automatic logout on 401 Unauthorized API responses
+  useEffect(() => {
+    const handleUnauthorized = () => {
+      setIsAdminLoggedIn(false);
+      if (isAdminConsoleRoute) {
+        navigate('/admin/login', { replace: true });
+      }
+    };
+    window.addEventListener('grabmykey_admin_unauthorized', handleUnauthorized);
+    return () => {
+      window.removeEventListener('grabmykey_admin_unauthorized', handleUnauthorized);
+    };
+  }, [isAdminConsoleRoute, navigate]);
 
   // Scroll to top on route change
   useEffect(() => {
@@ -7110,10 +8127,10 @@ export default function App() {
     const handleKeyDown = (e) => {
       if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
-        if (localStorage.getItem('adminToken') === 'true') {
+        if (getStoredAdminToken()) {
           navigate('/manage-345');
         } else {
-          setShowAdminLoginModal(true);
+          navigate('/admin/login');
         }
       }
     };
@@ -7138,12 +8155,14 @@ export default function App() {
     };
     window.addEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
     window.addEventListener('grabmykey_property_created', handlePropertiesUpdated);
+    window.addEventListener('grabmykey_property_deleted', handlePropertiesUpdated);
 
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
       window.removeEventListener('grabmykey_settings_updated', handleSettingsUpdated);
       window.removeEventListener('grabmykey_properties_updated', handlePropertiesUpdated);
       window.removeEventListener('grabmykey_property_created', handlePropertiesUpdated);
+      window.removeEventListener('grabmykey_property_deleted', handlePropertiesUpdated);
     };
   }, [navigate]);
 
@@ -7158,26 +8177,10 @@ export default function App() {
     navigate(`/property/${idOrSlug}`);
   };
 
-  const handleAdminLogin = (e) => {
-    e.preventDefault();
-    if (adminPin.trim() === '345' || adminPin.trim() === '1234') {
-      setIsAdminLoggedIn(true);
-      localStorage.setItem('adminToken', 'true');
-      setShowAdminLoginModal(false);
-      setAdminPin('');
-      setAdminPinError(false);
-      if (!location.pathname.startsWith('/manage-345')) {
-        navigate('/manage-345');
-      }
-    } else {
-      setAdminPinError(true);
-    }
-  };
-
-  const handleAdminLogout = () => {
+  const handleAdminLogout = async () => {
+    await adminLogout();
     setIsAdminLoggedIn(false);
-    localStorage.removeItem('adminToken');
-    navigate('/');
+    navigate('/admin/login');
   };
 
   // 1. Safe Optional Chaining Guard for Hero & Gallery References
@@ -7281,7 +8284,7 @@ export default function App() {
     if (heroYoutubeId) {
       return `https://img.youtube.com/vi/${heroYoutubeId}/maxresdefault.jpg`;
     }
-    return heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
+    return heroFeaturedProperty?.coverImage || heroFeaturedProperty?.images?.[0] || heroFeaturedProperty?.galleryImages?.[0] || "";
   }, [heroYoutubeId, heroFeaturedProperty]);
 
   const heroTitle = heroSettings?.heroOverlayTitle || heroFeaturedProperty?.title || "";
@@ -7314,10 +8317,38 @@ export default function App() {
 
 
   // =========================================================================
-  // VIEW 1: EXECUTIVE ADMIN SUITE (/manage-345 & /manage-345/publish-listing)
-  // Strictly isolated from public storefront layout
+  // VIEW: ADMIN LOGIN PAGE (/admin/login)
   // =========================================================================
-  if (isAdminRoute) {
+  if (isAdminLoginRoute) {
+    return (
+      <AdminLogin
+        onLoginSuccess={() => {
+          setIsAdminLoggedIn(true);
+          navigate('/manage-345');
+        }}
+      />
+    );
+  }
+
+  // =========================================================================
+  // VIEW: ADMIN SIGNUP PAGE (/admin/signup)
+  // =========================================================================
+  if (isAdminSignupRoute) {
+    return (
+      <AdminSignup
+        onSignupSuccess={() => {
+          setIsAdminLoggedIn(true);
+          navigate('/manage-345');
+        }}
+      />
+    );
+  }
+
+  // =========================================================================
+  // VIEW: EXECUTIVE ADMIN SUITE (/manage-345 & /admin/*)
+  // Strictly protected by verified JWT session token
+  // =========================================================================
+  if (isAdminConsoleRoute) {
     if (isAdminLoggedIn) {
       return (
         <AdminConsole
@@ -7331,53 +8362,10 @@ export default function App() {
     }
 
     return (
-      <div className="min-h-screen bg-[#060d19] text-slate-100 flex items-center justify-center p-4">
-        <div className="bg-[#0b1528] border border-slate-800 rounded-3xl p-8 max-w-sm w-full shadow-2xl relative">
-          <button 
-            onClick={() => navigate('/')}
-            className="absolute top-5 right-5 text-slate-400 hover:text-white p-1 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
-            title="Return to Public Storefront"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          <div className="text-center mb-6">
-            <div className="w-12 h-12 rounded-2xl bg-slate-900 text-[#d4af37] border border-slate-700 flex items-center justify-center mx-auto mb-3 shadow-md">
-              <Lock className="w-6 h-6" />
-            </div>
-            <h3 className="text-xl font-serif font-bold text-white tracking-wide">Executive Command Center</h3>
-            <p className="text-xs text-slate-400 mt-1">Authorized personnel only (PIN: 345)</p>
-          </div>
-
-          <form onSubmit={handleAdminLogin} className="space-y-4">
-            <div>
-              <input 
-                type="password"
-                placeholder="Enter PIN"
-                value={adminPin}
-                onChange={(e) => setAdminPin(e.target.value)}
-                className="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-white font-semibold focus:border-[#d4af37] focus:outline-none transition-colors"
-                autoFocus
-              />
-              {adminPinError && (
-                <p className="text-red-400 text-xs text-center mt-2 font-medium">Incorrect security PIN code. Try 345.</p>
-              )}
-            </div>
-
-            <button 
-              type="submit"
-              className="w-full bg-gradient-to-r from-[#b8860b] to-[#d4af37] hover:brightness-110 text-white font-bold py-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-lg cursor-pointer"
-            >
-              Authenticate & Enter
-            </button>
-            <button 
-              type="button"
-              onClick={() => navigate('/')}
-              className="w-full text-center text-xs text-slate-400 hover:text-white transition-colors cursor-pointer mt-2"
-            >
-              ← Return to Public Storefront
-            </button>
-          </form>
+      <div className="min-h-screen bg-[#070D18] flex items-center justify-center p-4">
+        <div className="text-center space-y-3">
+          <Loader2 className="w-8 h-8 text-[#C59B27] animate-spin mx-auto" />
+          <p className="text-xs font-mono text-slate-400">Verifying administrative security token...</p>
         </div>
       </div>
     );
@@ -7536,60 +8524,6 @@ export default function App() {
 
       </main>
 
-      {/* =================================================================== */}
-      {/* ADMIN PIN AUTHENTICATION MODAL (PIN: 345)                           */}
-      {/* =================================================================== */}
-      {showAdminLoginModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-sm w-full p-6 relative shadow-2xl border border-slate-200">
-            <button 
-              onClick={() => {
-                setShowAdminLoginModal(false);
-                setAdminPin('');
-                setAdminPinError(false);
-                if (location.pathname.startsWith('/manage-345')) {
-                  navigateTo('/');
-                }
-              }}
-              className="absolute top-4 right-4 text-slate-400 hover:text-slate-800 cursor-pointer"
-            >
-              <X className="w-5 h-5" />
-            </button>
-
-            <div className="text-center mb-6">
-              <div className="w-12 h-12 rounded-full bg-amber-50 text-[#b8860b] border border-amber-200 flex items-center justify-center mx-auto mb-3">
-                <Lock className="w-6 h-6" />
-              </div>
-              <h3 className="text-xl font-serif text-[#0a1d37]">Private Admin Portal</h3>
-              <p className="text-xs text-slate-500 mt-1">Enter your admin PIN (PIN: 345)</p>
-            </div>
-
-            <form onSubmit={handleAdminLogin} className="space-y-4">
-              <div>
-                <input 
-                  type="password"
-                  placeholder="Enter PIN"
-                  value={adminPin}
-                  onChange={(e) => setAdminPin(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-3 text-center text-lg tracking-widest text-[#0a1d37] font-semibold focus:border-[#b8860b] focus:outline-none"
-                  autoFocus
-                />
-                {adminPinError && (
-                  <p className="text-red-600 text-xs text-center mt-2 font-medium">Incorrect PIN code. Try 345.</p>
-                )}
-              </div>
-
-              <button 
-                type="submit"
-                className="w-full bg-[#0a1d37] hover:bg-[#061426] text-white border border-[#b8860b]/30 hover:border-[#b8860b] font-semibold py-3 rounded-xl text-xs uppercase tracking-wider transition-all shadow-md cursor-pointer"
-              >
-                Authenticate Access
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
-
       {/* FOOTER - Hidden on property detail view so page ends cleanly above the fixed bottom bar */}
       {activeView !== 'property-detail' && <Footer />}
 
@@ -7653,8 +8587,22 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  timeout: 5000
+  timeout: 10000
 });
+
+// Request interceptor: automatically attach JWT token if available
+apiClient.interceptors.request.use(
+  (config) => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('gmk_admin_jwt');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // Interceptor for response unwrapping and error logging
 apiClient.interceptors.response.use(
@@ -7663,6 +8611,14 @@ apiClient.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    // If backend returns 401 Unauthorized, automatically purge stored credentials
+    if (error.response && error.response.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('gmk_admin_jwt');
+        localStorage.removeItem('gmk_admin_user');
+        window.dispatchEvent(new CustomEvent('grabmykey_admin_unauthorized'));
+      }
+    }
     const isOffline = error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || !error.response;
     if (isOffline) {
       setBackendOffline(true);
@@ -7704,14 +8660,18 @@ export const normalizeProperty = (p) => {
   }
   prop.priceText = prop.priceText || (prop.price ? String(prop.price).replace(/^₹/, '').replace(/ •.*/, '').trim() : '');
 
-  const imgs = (Array.isArray(prop.images) && prop.images.length > 0)
-    ? prop.images
-    : ((Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0)
-        ? prop.galleryImages
-        : []);
-  prop.images = imgs;
-  prop.galleryImages = imgs;
-  prop.thumbnail = prop.thumbnail || imgs[0] || '';
+  const rawCover = prop.coverImage || '';
+  const rawGallery = Array.isArray(prop.galleryImages) ? prop.galleryImages : [];
+  const rawImgs = Array.isArray(prop.images) ? prop.images : [];
+  const combined = [];
+  if (rawCover) combined.push(rawCover);
+  rawGallery.forEach(img => { if (img && !combined.includes(img)) combined.push(img); });
+  rawImgs.forEach(img => { if (img && !combined.includes(img)) combined.push(img); });
+
+  prop.coverImage = rawCover || combined[0] || '';
+  prop.images = combined;
+  prop.galleryImages = combined;
+  prop.thumbnail = prop.coverImage || combined[0] || '';
 
   if (!prop.youtubeVideoId && prop.videoUrl) {
     const match = prop.videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
@@ -7842,7 +8802,9 @@ export const createProperty = async (propertyData) => {
 
 // Delete a property listing by ID (Admin)
 export const deleteProperty = async (id) => {
-  return await apiClient.delete(`/properties/${id}`);
+  if (!id) throw new Error('Property ID is required for deletion');
+  const targetId = (typeof id === 'object' && id !== null) ? (id._id || id.id) : id;
+  return await apiClient.delete(`/properties/${targetId}`);
 };
 
 // Update an existing property listing (Admin)
@@ -8005,6 +8967,76 @@ export const checkServerHealth = async (forceProbe = false) => {
   }
 };
 
+/**
+ * Strict Admin Authentication API Methods
+ */
+export const getStoredAdminToken = () => {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('gmk_admin_jwt');
+};
+
+export const getStoredAdminUser = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('gmk_admin_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const adminLogin = async (email, password) => {
+  const res = await apiClient.post('/auth/login', { email, password });
+  if (res?.token) {
+    localStorage.setItem('gmk_admin_jwt', res.token);
+    if (res.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+  }
+  return res;
+};
+
+export const adminSignup = async ({ name, email, password, inviteKey }) => {
+  const res = await apiClient.post('/auth/signup', { name, email, password, inviteKey });
+  if (res?.token) {
+    localStorage.setItem('gmk_admin_jwt', res.token);
+    if (res.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+  }
+  return res;
+};
+
+export const adminVerifyToken = async () => {
+  const token = getStoredAdminToken();
+  if (!token) {
+    return { success: false, message: 'No token found' };
+  }
+  try {
+    const res = await apiClient.get('/auth/me');
+    if (res?.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+    return res;
+  } catch (err) {
+    localStorage.removeItem('gmk_admin_jwt');
+    localStorage.removeItem('gmk_admin_user');
+    throw err;
+  }
+};
+
+export const adminLogout = async () => {
+  try {
+    await apiClient.post('/auth/logout');
+  } catch {
+    // Ignore error on network failure
+  } finally {
+    localStorage.removeItem('gmk_admin_jwt');
+    localStorage.removeItem('gmk_admin_user');
+  }
+  return { success: true };
+};
+
 export default {
   fetchProperties,
   fetchPropertyById,
@@ -8022,7 +9054,13 @@ export default {
   updatePreset,
   deletePreset,
   seedDefaultPresets,
-  checkServerHealth
+  checkServerHealth,
+  adminLogin,
+  adminSignup,
+  adminVerifyToken,
+  adminLogout,
+  getStoredAdminToken,
+  getStoredAdminUser
 };
 
 
@@ -8320,7 +9358,7 @@ export function HeroFeaturedVideoCard({ property = null }) {
     let isMounted = true;
     const fetchFeatured = async () => {
       try {
-        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+        const apiUrl = API_ENDPOINTS.properties;
 
         const res = await fetch(apiUrl);
         if (res.ok) {
@@ -8397,7 +9435,7 @@ export function HeroFeaturedVideoCard({ property = null }) {
     location: activeProperty.location || (activeProperty.locality ? `${activeProperty.locality}, ${activeProperty.city || 'Mangaluru'}` : "Mangaluru"),
     priceText: activeProperty.priceText || (activeProperty.price ? String(activeProperty.price).replace(/^₹/, '').replace(/ •.*/, '') : ''),
     videoUrl: getEmbedVideoUrl(activeProperty.heroVideoUrl || activeProperty.videoUrl, activeProperty.youtubeVideoId),
-    thumbnail: activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
+    thumbnail: activeProperty.coverImage || activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
     slug: activeProperty.slug || activeProperty._id || activeProperty.id
   };
 
@@ -8608,7 +9646,7 @@ export default function PropertyCard({ property = null }) {
   const propDescription = property.description || '';
 
   // Image handling from live backend records (zero static fallbacks)
-  const propImage = property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
+  const propImage = property.coverImage || property.images?.[0] || property.galleryImages?.[0] || property.thumbnail || '';
 
   // Price formatting
   const propPrice = property.price || (
@@ -8695,9 +9733,10 @@ import ArchitecturalOverview from './ArchitecturalOverview';
 import Footer from './Footer';
 import { 
   Video, MapPin, Phone, CheckCircle2, 
-  ExternalLink, Layers, Sparkles, FileCheck, ArrowLeft, 
+  ExternalLink, FileCheck, ArrowLeft, 
   Calendar, Plane, Car, Train, Footprints,
-  GraduationCap, Bed, Bath, Building2
+  GraduationCap, Bed, Bath,
+  Check, Clock, Minus, ShieldCheck
 } from 'lucide-react';
 
 // Helper to format YouTube embed URLs without autoplay
@@ -8885,6 +9924,13 @@ export default function PropertyDetails({
   // Specs & Display Bindings with Safe Fallbacks
   const specs = propSpecsInput || getDefaultSpecs(property);
   const propDisplayId = property?.id || property?._id || "";
+  const propListingCode = property?.listingCode || (
+    property?.listingId && String(property.listingId).startsWith('GMK-')
+      ? property.listingId
+      : (propDisplayId
+          ? `GMK-MLR-${String(propDisplayId).replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase()}`
+          : 'GMK-MLR-101')
+  );
   const propDisplaySlug = property?.slug || propDisplayId;
   const propDisplayLocation = property?.locality 
     ? `${property.locality}, ${property.city}` 
@@ -8897,9 +9943,14 @@ export default function PropertyDetails({
     : (property?.area || 'N/A');
   const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 0;
   const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 0;
-  const propDisplayImages = (property?.galleryImages && property.galleryImages.length > 0)
-    ? property.galleryImages
-    : ((property?.images && property.images.length > 0) ? property.images : []);
+  const rawCover = property?.coverImage || '';
+  const rawGallery = Array.isArray(property?.galleryImages) ? property.galleryImages : [];
+  const rawImgs = Array.isArray(property?.images) ? property.images : [];
+  const combinedImages = [];
+  if (rawCover) combinedImages.push(rawCover);
+  rawGallery.forEach(img => { if (img && !combinedImages.includes(img)) combinedImages.push(img); });
+  rawImgs.forEach(img => { if (img && !combinedImages.includes(img)) combinedImages.push(img); });
+  const propDisplayImages = combinedImages;
   const propDisplayVideoUrl = property?.youtubeVideoId 
     ? `https://www.youtube.com/watch?v=${property.youtubeVideoId}` 
     : property?.videoUrl;
@@ -8950,7 +10001,7 @@ export default function PropertyDetails({
                 <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest flex items-center gap-2">
                   <span>{property?.category || propDisplayType || 'Villa'}</span>
                   <span className="text-slate-300">•</span>
-                  <span className="text-slate-400 font-normal">Listing #{property?.listingId || propDisplayId || '1'}</span>
+                  <span className="text-slate-400 font-normal">Listing Ref: {propListingCode}</span>
                 </div>
 
                 {/* Property Title */}
@@ -9033,23 +10084,53 @@ export default function PropertyDetails({
 
                       {/* Right: Status Badge */}
                       <div className="shrink-0">
-                        {status === 'Verified' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            ✓ Verified
-                          </span>
-                        ) : status === 'Pending' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
-                            ⏳ Pending
-                          </span>
-                        ) : status === 'Issue Flagged' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200/60">
-                            ✕ Flagged
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200/60">
-                            — Pending
-                          </span>
-                        )}
+                        {(() => {
+                          const norm = (status || '').trim().toLowerCase();
+                          if (
+                            norm === 'verified' ||
+                            norm.includes('clean') ||
+                            norm.includes('clear') ||
+                            norm.includes('nil ec') ||
+                            norm.includes('compliant')
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Verified</span>
+                              </span>
+                            );
+                          }
+                          if (
+                            norm.includes('not applicable') ||
+                            norm === 'na' ||
+                            norm === 'n/a'
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-500 border border-stone-200">
+                                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Not Applicable</span>
+                              </span>
+                            );
+                          }
+                          if (
+                            norm.includes('flagged') ||
+                            norm.includes('issue') ||
+                            norm.includes('action')
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Action Required</span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>Pending</span>
+                            </span>
+                          );
+                        })()}
                       </div>
 
                     </div>
@@ -9072,12 +10153,14 @@ export default function PropertyDetails({
                       {/* Right: Status Badge */}
                       <div className="shrink-0">
                         {item?.isCleared ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            ✓ Verified
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Verified</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200/60">
-                            ✕ Action Req.
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Action Required</span>
                           </span>
                         )}
                       </div>
@@ -9100,7 +10183,7 @@ export default function PropertyDetails({
                   </div>
                 </div>
                 <a 
-                  href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20verify%20title%20clearance%20with%20an%20Advocate%20(Bank%20Loan%20Bridge)%20for%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+                  href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20verify%20title%20clearance%20with%20an%20Advocate%20(Bank%20Loan%20Bridge)%20for%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061224] text-white font-semibold px-4 py-2.5 rounded-xl text-xs tracking-wider transition-all shadow-sm shrink-0"
@@ -9171,7 +10254,7 @@ export default function PropertyDetails({
                 {propDisplayType || 'RESALE'}
               </span>
               <span className="text-xs font-mono text-slate-500 font-semibold">
-                #{propDisplayId}
+                {propListingCode}
               </span>
             </div>
 
@@ -9289,7 +10372,7 @@ export default function PropertyDetails({
 
             {/* Primary WhatsApp CTA Button */}
             <a 
-              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20am%20interested%20in%20inspecting%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20am%20interested%20in%20inspecting%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
               target="_blank"
               rel="noreferrer"
               className="w-full bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#c49f28] hover:to-[#997315] text-white font-bold py-3.5 px-4 rounded-xl text-xs uppercase tracking-wider text-center flex items-center justify-center space-x-2 shadow-md transition-all cursor-pointer mb-3"
@@ -9300,7 +10383,7 @@ export default function PropertyDetails({
 
             {/* Schedule Private Tour Button */}
             <a 
-              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20schedule%20a%20private%20tour%20for%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20schedule%20a%20private%20tour%20for%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
               target="_blank"
               rel="noreferrer"
               className="w-full bg-[#0a1d37] hover:bg-[#061224] text-white font-semibold py-2.5 px-4 rounded-xl text-xs tracking-wider text-center flex items-center justify-center space-x-2 transition-all cursor-pointer border border-[#b8860b]/30"
@@ -9640,7 +10723,7 @@ export default function PropertyImageGallery({
 
 ```jsx
 import React, { useState } from 'react';
-import { Layers, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Layers, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function PropertySpecifications({ specifications = [] }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -9697,10 +10780,17 @@ export default function PropertySpecifications({ specifications = [] }) {
                     {item.feature}
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
-                      <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]"/>
-                      {item.status}
-                    </span>
+                    {(item.status === 'Included' || item.isAvailable === true) ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+                        <CheckCircle className="w-3.5 h-3.5 stroke-[2.5] text-emerald-600"/>
+                        <span>Included</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-100 text-stone-500 border border-stone-200 font-semibold text-[11px]">
+                        <X className="w-3.5 h-3.5 stroke-[2.5] text-stone-400"/>
+                        <span>Not Included</span>
+                      </span>
+                    )}
                   </td>
                   <td className="py-4 px-6 text-slate-600 leading-relaxed max-w-lg">
                     {item.details}
@@ -9851,11 +10941,13 @@ import {
   ArrowLeft, ArrowRight, RotateCw, ShieldCheck, Database,
   LogOut, PlusCircle, Trash2, Video, Upload, FileText,
   X, Check, Lock, ChevronRight, Layers, FileCheck, CheckCircle2,
-  Maximize2, Minus, ExternalLink, Play, RefreshCw, MapPin
+  Maximize2, Minus, ExternalLink, Play, RefreshCw, MapPin,
+  Image as ImageIcon, Star
 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 import { getAssetSpecPresets } from '../defaultPresets';
 import AddCustomItemModal from './AddCustomItemModal';
+import PublishSuccessModal from './PublishSuccessModal';
 
 export default function PublishListingPage({ onExit, onSaveProperty }) {
   const navigate = useNavigate();
@@ -9901,6 +10993,103 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
   const [channelVideos] = useState([]);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+
+  // Dedicated Cover Photo & Gallery Upload State
+  const [coverPhoto, setCoverPhoto] = useState(null); // { id, url, name, size }
+  const [galleryPhotos, setGalleryPhotos] = useState([]); // [{ id, url, name, size }]
+  const [legalDocuments, setLegalDocuments] = useState([]);
+
+  // Dedicated Publish Success Popup Modal State
+  const [publishedRecord, setPublishedRecord] = useState(null);
+  const [showPublishSuccessModal, setShowPublishSuccessModal] = useState(false);
+
+  // Client-Side Canvas Image Compression Helper (Max 1600px width, 0.85 quality)
+  const compressImageFile = (file, maxWidth = 1600, quality = 0.85) => {
+    return new Promise((resolve) => {
+      if (!file || !file.type.startsWith('image/')) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
+          resolve({
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            url: dataUrl,
+            name: file.name,
+            size: `${Math.round((dataUrl.length * 0.75) / 1024)} KB`
+          });
+        };
+        img.onerror = () => {
+          resolve({
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            url: e.target.result,
+            name: file.name,
+            size: `${(file.size / 1024).toFixed(0)} KB`
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Primary Cover Photo Upload Handlers
+  const handleCoverPhotoUpload = async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const processed = await compressImageFile(e.target.files[0]);
+      if (processed) {
+        setCoverPhoto(processed);
+      }
+    }
+  };
+
+  const handleRemoveCoverPhoto = () => {
+    setCoverPhoto(null);
+  };
+
+  // Property Gallery Photos Upload Handlers
+  const handleGalleryUpload = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      const results = await Promise.all(files.map(f => compressImageFile(f)));
+      const valid = results.filter(Boolean);
+      setGalleryPhotos(prev => [...prev, ...valid]);
+    }
+  };
+
+  const handleRemoveGalleryPhoto = (idx) => {
+    setGalleryPhotos(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleLegalDocUpload = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newDocs = Array.from(e.target.files).map(f => ({
+        name: f.name,
+        size: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
+        type: 'document'
+      }));
+      setLegalDocuments(prev => [...prev, ...newDocs]);
+    }
+  };
+
+  const handleRemoveLegalDoc = (idx) => {
+    setLegalDocuments(prev => prev.filter((_, i) => i !== idx));
+  };
 
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -10024,7 +11213,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: '30-Year Parent Deed Chain Audit',
       category: 'Ownership',
       activeStatus: 'Cleared',
-      activeLabel: '✓ Cleared',
+      activeLabel: 'Cleared',
       verifiedStatus: 'Pending',
       description: 'Chain of title deeds dating back 30 years verified without break in title',
       verificationNote: '30-Year Parent Deed Chain Audit',
@@ -10036,7 +11225,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: '30-Year Encumbrance Certificate',
       category: 'Ownership',
       activeStatus: 'Nil EC verified',
-      activeLabel: '✓ Nil EC verified',
+      activeLabel: 'Nil EC verified',
       verifiedStatus: 'Pending',
       description: 'Form 15 Nil Encumbrance Certificate verified through Kaveri / Sub-Registrar',
       verificationNote: '30-Year Encumbrance Certificate (Nil EC verified)',
@@ -10048,7 +11237,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'Revenue RTC / Mutation Compliance',
       category: 'Ownership',
       activeStatus: 'Verified',
-      activeLabel: '✓ Verified',
+      activeLabel: 'Verified',
       verifiedStatus: 'Pending',
       description: 'Pahani / RTC mutation extract reflects unambiguous vendor ownership',
       verificationNote: 'Revenue RTC / Mutation Compliance (Verified)',
@@ -10060,7 +11249,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'MCC / Local Body Plan Approvals',
       category: 'Municipal',
       activeStatus: 'Compliant',
-      activeLabel: '✓ Compliant',
+      activeLabel: 'Compliant',
       verifiedStatus: 'Pending',
       description: 'Mangaluru City Corporation sanctioned blueprint and occupancy certificate',
       verificationNote: 'MCC / Local Body Plan Approvals (Compliant)',
@@ -10072,7 +11261,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'Physical Boundary DGPS Survey',
       category: 'Ownership',
       activeStatus: 'Cleared',
-      activeLabel: '✓ Cleared',
+      activeLabel: 'Cleared',
       verifiedStatus: 'Pending',
       description: 'Field Measurement Book (FMB) coordinates match physical compound boundary',
       verificationNote: 'Physical Boundary DGPS Survey (Cleared)',
@@ -10223,7 +11412,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: docName,
       category: 'Custom Clearance',
       activeStatus: 'Verified',
-      activeLabel: '✓ Verified',
+      activeLabel: 'Verified',
       verifiedStatus: legalModalData.verifiedStatus || 'Pending Audit',
       description: (legalModalData.verificationNote || '').trim() || 'Audited statutory clearance on record',
       verificationNote: (legalModalData.verificationNote || '').trim() || 'Audited clearance on record',
@@ -10286,9 +11475,18 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       dgpsSurveyVerification: legalChecklist.find(i => i.id === 'dgpsSurveyVerification')?.verifiedStatus === 'Cleared' || legalChecklist.find(i => i.id === 'dgpsSurveyVerification')?.verifiedStatus === 'Verified' ? 'Cleared' : 'Pending'
     };
 
+    const resolvedCover = coverPhoto?.url || (galleryPhotos[0]?.url || '');
+    const galleryUrls = galleryPhotos.map(p => p.url);
+    const orderedGalleryImages = resolvedCover
+      ? [resolvedCover, ...galleryUrls.filter(u => u !== resolvedCover)]
+      : (galleryUrls.length > 0 ? galleryUrls : (uploadedFiles.filter(f => f.type === 'image').map(f => f.name)));
+
+    const generatedListingCode = `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+
     const formData = {
       // Direct Top-Level Keys matching Mongoose schema in server/models/Property.js
       title: title.trim(),
+      listingCode: generatedListingCode,
       price: price || formatDisplayPrice(rawPriceNum),
       priceRaw: rawPriceNum,
       category: isLand ? 'Land/Plot' : assetCategory,
@@ -10296,6 +11494,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       carpetArea: superArea || '',
       heroVideoUrl: videoUrl || '',
       videoUrl: videoUrl || '',
+      coverImage: resolvedCover,
+      galleryImages: galleryUrls,
+      images: orderedGalleryImages,
       slug: generatedSlug,
       city: 'Mangaluru',
       dealType: 'Resale',
@@ -10313,7 +11514,6 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         totalFloors: '1'
       },
       youtubeVideoId: videoUrl?.includes('v=') ? videoUrl.split('v=')[1]?.substring(0, 11) : (videoUrl?.includes('youtu.be/') ? videoUrl.split('youtu.be/')[1]?.substring(0, 11) : ''),
-      galleryImages: uploadedFiles.filter(f => f.type === 'image').map(f => f.name),
       description: description || '',
       componentsMatrix: [
         ...componentsMatrix.map(item => ({
@@ -10362,7 +11562,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       ]
     };
 
-    const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+    const apiUrl = API_ENDPOINTS.properties;
 
     try {
       const response = await fetch(apiUrl, {
@@ -10385,8 +11585,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         window.dispatchEvent(new CustomEvent('grabmykey_property_created', { detail: savedDoc }));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
 
-        // On HTTP 201 success, navigate to /manage-345 so the new listing immediately populates in the database inventory count
-        navigate('/manage-345');
+        // Dedicated Publish Success Popup Modal (Zero Native Alerts)
+        setPublishedRecord({ ...formData, ...savedDoc });
+        setShowPublishSuccessModal(true);
         return;
       } else {
         const errData = await response.json().catch(() => ({}));
@@ -10471,8 +11672,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                   <button
                     type="button"
                     onClick={onExit || (() => {
-                      localStorage.removeItem('adminToken');
-                      navigate('/');
+                      localStorage.removeItem('gmk_admin_jwt');
+                      localStorage.removeItem('gmk_admin_user');
+                      navigate('/admin/login');
                     })}
                     className="bg-[#0a1d37] text-white hover:bg-[#061426] px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer"
                   >
@@ -10534,7 +11736,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                       className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-700 hover:text-[#0a1d37] transition-colors bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs hover:bg-slate-50 cursor-pointer"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>← Back to Inventory</span>
+                      <span>Back to Inventory</span>
                     </button>
                     <span className="text-[10px] font-mono uppercase tracking-widest text-[#b8860b] font-bold">
                       EXECUTIVE MANAGEMENT SUITE
@@ -10857,53 +12059,220 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                         )}
                       </div>
 
-                      {/* LOCAL FILE UPLOADS: image/*, .pdf */}
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                          High-Resolution Photography & Document Attachments
-                        </label>
-                        
-                        <div className="border-2 border-dashed border-slate-300 hover:border-[#C59B27] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
-                          <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#C59B27] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                      {/* 1. DEDICATED PRIMARY COVER PHOTO UPLOAD ZONE */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                              Primary Cover Photo <span className="text-red-500">*</span>
+                            </label>
+                            <span className="text-[11px] text-slate-500">
+                              The hero photograph featured on catalog cards, homepage highlights, and page headers (.jpg, .png, .webp).
+                            </span>
+                          </div>
+                          {coverPhoto && (
+                            <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                              <Check className="w-3 h-3" />
+                              <span>Cover Selected</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {coverPhoto ? (
+                          /* Instant Image Preview Card */
+                          <div className="relative border-2 border-emerald-500/40 bg-white rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+                            <div className="relative w-full sm:w-56 h-36 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                              <img
+                                src={coverPhoto.url}
+                                alt={coverPhoto.name || 'Primary Cover'}
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute top-2 left-2 bg-[#C59B27] text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-sm font-mono flex items-center space-x-1">
+                                <Star className="w-2.5 h-2.5 fill-current" />
+                                <span>PRIMARY COVER</span>
+                              </span>
+                            </div>
+                            <div className="flex-1 w-full space-y-2">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                  Active Catalog Hero
+                                </span>
+                                <h4 className="text-sm font-bold text-[#0F1E36] mt-1.5 truncate" title={coverPhoto.name}>
+                                  {coverPhoto.name || 'Cover Photo'}
+                                </h4>
+                                <span className="text-xs text-slate-500 font-mono block mt-0.5">
+                                  Size: {coverPhoto.size} • Format: Optimized Image
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-3 pt-2">
+                                <label className="inline-flex items-center space-x-1.5 bg-[#FAF8F5] hover:bg-slate-100 text-[#0F1E36] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-300 transition-all">
+                                  <Upload className="w-3.5 h-3.5" />
+                                  <span>Replace Photo</span>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    onChange={handleCoverPhotoUpload}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={handleRemoveCoverPhoto}
+                                  className="inline-flex items-center space-x-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3.5 py-2 rounded-xl text-xs font-semibold border border-red-200 transition-all cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Remove Photo</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Dedicated Single Dropzone */
+                          <div className="border-2 border-dashed border-amber-200/90 hover:border-[#C59B27] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
+                            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#C59B27] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                              <ImageIcon className="w-6 h-6" />
+                            </div>
+                            <h5 className="text-xs font-bold text-[#0F1E36] mb-1">
+                              Upload Primary Cover Photo (.jpg, .png, .webp)
+                            </h5>
+                            <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                              Select a single hero photograph to represent this property across the catalog and homepage.
+                            </p>
+                            <label className="inline-flex items-center space-x-2 bg-[#C59B27] hover:bg-[#b0881e] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#C59B27]/40">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Select Primary Cover Photo</span>
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handleCoverPhotoUpload}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. DEDICATED PROPERTY GALLERY PHOTOS MULTI-FILE UPLOAD ZONE */}
+                      <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                              Property Gallery Photos
+                            </label>
+                            <span className="text-[11px] text-slate-500">
+                              Upload additional interior, exterior, elevation, and amenity views (.jpg, .png, .webp).
+                            </span>
+                          </div>
+                          {galleryPhotos.length > 0 && (
+                            <span className="text-[11px] font-mono font-bold text-[#C59B27] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                              {galleryPhotos.length} Photo{galleryPhotos.length !== 1 ? 's' : ''} Uploaded
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Multi-file Gallery Dropzone */}
+                        <div className="border-2 border-dashed border-slate-300 hover:border-[#0a1d37] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
+                          <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-100 text-[#0a1d37] border border-slate-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
                             <Upload className="w-6 h-6" />
                           </div>
                           <h5 className="text-xs font-bold text-[#0F1E36] mb-1">
-                            Upload Local Files (.jpg, .png, .pdf)
+                            Upload Gallery Photos (.jpg, .png, .webp)
                           </h5>
                           <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
-                            Drag and drop local asset photos or legal deed PDFs directly, or browse files from your disk.
+                            Select multiple photos from your device to populate the property photo gallery carousel.
                           </p>
-                          <label className="inline-flex items-center space-x-2 bg-[#0F1E36] hover:bg-[#081220] text-white px-5 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider cursor-pointer shadow-sm transition-all">
-                            <Upload className="w-3.5 h-3.5 text-[#e6ca65]" />
-                            <span>Browse Files</span>
+                          <label className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061426] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#0a1d37]/40">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Select Gallery Photos</span>
                             <input
                               type="file"
                               multiple
-                              accept="image/*,.pdf"
-                              onChange={handleFileUpload}
+                              accept="image/jpeg,image/png,image/webp"
+                              onChange={handleGalleryUpload}
                               className="hidden"
                             />
                           </label>
                         </div>
 
-                        {/* Uploaded File Chips */}
-                        {uploadedFiles.length > 0 && (
-                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            {uploadedFiles.map((file, idx) => (
+                        {/* Clean Gallery Thumbnails Grid with Individual Remove Buttons */}
+                        {galleryPhotos.length > 0 && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2">
+                            {galleryPhotos.map((photo, idx) => (
+                              <div
+                                key={photo.id || idx}
+                                className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white shadow-2xs hover:border-[#C59B27] transition-all"
+                              >
+                                <div className="h-28 w-full overflow-hidden bg-slate-100 relative">
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.name || `Gallery photo ${idx + 1}`}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveGalleryPhoto(idx)}
+                                    className="absolute top-2 right-2 p-1.5 bg-black/75 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer shadow-sm"
+                                    title="Remove photo"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <div className="p-2">
+                                  <p className="text-[11px] font-medium text-[#0F1E36] truncate" title={photo.name}>
+                                    {photo.name || `Photo #${idx + 1}`}
+                                  </p>
+                                  <span className="text-[10px] text-slate-400 font-mono block">{photo.size}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* B. SEPARATE STATUTORY LEGAL DEEDS & DOCUMENT ATTACHMENTS (.PDF) */}
+                      <div className="space-y-3 pt-4 border-t border-slate-200/80">
+                        <div>
+                          <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                            Statutory Legal Deeds & Audit Attachments (.pdf)
+                          </label>
+                          <span className="text-[11px] text-slate-500">
+                            Attach statutory Mother Deeds, 30-Year Encumbrance Certificates, RTC extracts, and MCC sanction plans.
+                          </span>
+                        </div>
+
+                        <div className="border border-dashed border-slate-300 hover:border-slate-400 rounded-2xl p-5 text-center bg-white transition-all">
+                          <FileText className="w-6 h-6 text-slate-400 mx-auto mb-2" />
+                          <p className="text-xs font-semibold text-slate-700 mb-2">
+                            Select Title Deeds & Statutory Verification PDFs
+                          </p>
+                          <label className="inline-flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-[#0a1d37] border border-slate-300 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-2xs transition-all">
+                            <Upload className="w-3 h-3" />
+                            <span>Browse Document PDFs</span>
+                            <input
+                              type="file"
+                              multiple
+                              accept=".pdf,application/pdf"
+                              onChange={handleLegalDocUpload}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {/* Uploaded Legal Document Chips */}
+                        {legalDocuments.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+                            {legalDocuments.map((doc, idx) => (
                               <div key={idx} className="flex items-center space-x-2 p-2.5 bg-white border border-slate-200 rounded-xl text-xs shadow-2xs">
-                                <FileText className="w-4 h-4 text-[#C59B27] shrink-0" />
+                                <FileCheck className="w-4 h-4 text-[#C59B27] shrink-0" />
                                 <div className="min-w-0 flex-1">
-                                  <span className="truncate block text-slate-800 font-medium text-[11px]">{file.name}</span>
-                                  <span className="text-[10px] text-slate-400 font-mono">{file.size}</span>
+                                  <span className="truncate block text-slate-800 font-medium text-[11px]">{doc.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">{doc.size}</span>
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    removeUploadedFile(idx);
-                                  }}
+                                  onClick={() => handleRemoveLegalDoc(idx)}
                                   className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 shrink-0 cursor-pointer"
-                                  title="Remove attachment"
+                                  title="Remove document"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
@@ -10932,7 +12301,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                               </h3>
                             </div>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              Grouped specifications with availability toggles (✓ / —) and optional custom descriptive notes.
+                              Grouped specifications with availability toggles and optional custom descriptive notes.
                             </p>
                           </div>
                           <div className="flex items-center space-x-2">
@@ -11001,14 +12370,18 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                             <button
                                               type="button"
                                               onClick={() => handleToggleFeature(item.originalIdx)}
-                                              title={isIncluded ? "Click to mark Not Included (—)" : "Click to mark Included (✓)"}
-                                              className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs ${
+                                              title={isIncluded ? "Click to mark Not Included" : "Click to mark Included"}
+                                              className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs border ${
                                                 isIncluded
-                                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                                  : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                                  : 'bg-stone-100 text-stone-500 border-stone-200 hover:bg-stone-200'
                                               }`}
                                             >
-                                              <span>{isIncluded ? '✓' : '—'}</span>
+                                              {isIncluded ? (
+                                                <Check className="w-3 h-3 stroke-[2.5] text-emerald-600" />
+                                              ) : (
+                                                <X className="w-3 h-3 stroke-[2.5] text-stone-400" />
+                                              )}
                                               <span className="text-[10px] uppercase font-mono">{isIncluded ? 'Included' : 'Not Included'}</span>
                                             </button>
                                             <span className="text-xs font-bold text-[#0a1d37] truncate" title={item.featureName}>
@@ -11274,7 +12647,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                         ? 'bg-slate-100 text-slate-500 border-slate-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}>
-                                    {isPassed ? (item.activeLabel || '✓ Verified') : item.verifiedStatus === 'Not Applicable' ? '— Not Applicable' : '⏳ Pending'}
+                                    {isPassed ? (item.activeLabel || 'Verified') : item.verifiedStatus === 'Not Applicable' ? 'Not Applicable' : 'Pending'}
                                   </span>
                                 </div>
                                 <p className="text-[11px] text-slate-500 pl-4">{item.description || item.verificationNote}</p>
@@ -11309,7 +12682,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                           : 'bg-white text-emerald-700 border-slate-200 hover:bg-emerald-50'
                                       }`}
                                     >
-                                      {item.activeLabel || '✓ Cleared'}
+                                      {item.activeLabel || 'Cleared'}
                                     </button>
                                   </>
                                 ) : (
@@ -11319,9 +12692,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                       onChange={(e) => handleUpdateLegalStatus(idx, e.target.value)}
                                       className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-[#0a1d37] focus:border-[#C59B27] focus:outline-none cursor-pointer"
                                     >
-                                      <option value="Verified">✓ Verified</option>
-                                      <option value="Pending Audit">⏳ Pending Audit</option>
-                                      <option value="Not Applicable">— Not Applicable</option>
+                                      <option value="Verified">Verified</option>
+                                      <option value="Pending Audit">Pending Audit</option>
+                                      <option value="Not Applicable">Not Applicable</option>
                                     </select>
                                     <button
                                       type="button"
@@ -11546,7 +12919,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
               onChange={e => setCategoryModalData({ ...categoryModalData, isIncluded: e.target.checked })}
               className="w-4 h-4 text-[#C59B27] rounded border-slate-300 focus:ring-[#C59B27]"
             />
-            <span className="text-xs font-medium text-slate-700">Mark feature as Included (✓)</span>
+            <span className="text-xs font-medium text-slate-700">Mark feature as Included</span>
           </label>
         </div>
       </AddCustomItemModal>
@@ -11593,7 +12966,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             onChange={e => setFeatureModalData({ ...featureModalData, isAvailable: e.target.checked })}
             className="w-4 h-4 text-[#C59B27] rounded border-slate-300 focus:ring-[#C59B27]"
           />
-          <span className="text-xs font-medium text-slate-700">Mark feature as Included (✓)</span>
+          <span className="text-xs font-medium text-slate-700">Mark feature as Included</span>
         </label>
       </AddCustomItemModal>
 
@@ -11629,9 +13002,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             onChange={e => setLegalModalData({ ...legalModalData, verifiedStatus: e.target.value })}
             className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none cursor-pointer"
           >
-            <option value="Verified">✓ Verified</option>
-            <option value="Pending Audit">⏳ Pending Audit</option>
-            <option value="Not Applicable">— Not Applicable</option>
+            <option value="Verified">Verified</option>
+            <option value="Pending Audit">Pending Audit</option>
+            <option value="Not Applicable">Not Applicable</option>
           </select>
         </div>
         <div>
@@ -11648,9 +13021,176 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         </div>
       </AddCustomItemModal>
 
+      {/* DEDICATED PUBLISH SUCCESS POPUP MODAL */}
+      <PublishSuccessModal
+        isOpen={showPublishSuccessModal}
+        onClose={() => setShowPublishSuccessModal(false)}
+        property={publishedRecord}
+        onViewProperty={(prop) => {
+          setShowPublishSuccessModal(false);
+          navigate(`/property/${prop.slug || prop.id || prop._id}`);
+        }}
+        onBackToInventory={() => {
+          setShowPublishSuccessModal(false);
+          if (onExit) onExit();
+          else navigate('/manage-345');
+        }}
+      />
+
     </div>
   );
 }
+
+```
+
+## File: `src/components/PublishSuccessModal.jsx`
+
+```jsx
+import React, { useEffect } from 'react';
+import { CheckCircle2, Eye, ArrowLeft, ExternalLink, X, MapPin } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+
+export default function PublishSuccessModal({
+  isOpen,
+  onClose,
+  property,
+  onViewProperty,
+  onBackToInventory
+}) {
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        if (onClose) onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  if (!isOpen || !property) return null;
+
+  const propId = property.id || property._id || '';
+  const propSlug = property.slug || propId;
+  const propListingCode = property.listingCode || (
+    propId ? `GMK-MLR-${String(propId).replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase()}` : 'GMK-MLR-101'
+  );
+  const propLocation = property.locality 
+    ? `${property.locality}, ${property.city || 'Mangaluru'}`
+    : (property.location || 'Mangaluru, Karnataka');
+
+  const handleView = () => {
+    if (onViewProperty) {
+      onViewProperty(property);
+    } else {
+      navigate(`/property/${propSlug}`);
+    }
+    if (onClose) onClose();
+  };
+
+  const handleBack = () => {
+    if (onBackToInventory) {
+      onBackToInventory();
+    } else {
+      navigate('/manage-345');
+    }
+    if (onClose) onClose();
+  };
+
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+      onClick={handleBack}
+    >
+      <div
+        className="bg-[#FAF8F5] text-[#1A1A1A] border border-amber-200/80 rounded-3xl shadow-2xl max-w-lg w-full overflow-hidden animate-in zoom-in-95 duration-200 relative"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Close Button */}
+        <button
+          type="button"
+          onClick={handleBack}
+          className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 p-1.5 rounded-full hover:bg-slate-200/60 transition-colors cursor-pointer"
+          title="Close dialog"
+        >
+          <X className="w-5 h-5" />
+        </button>
+
+        <div className="p-6 md:p-8 text-center">
+          {/* Animated Gold Checkmark Badge */}
+          <div className="relative w-20 h-20 mx-auto mb-5">
+            <div className="absolute inset-0 rounded-full bg-amber-100/80 animate-ping opacity-25" />
+            <div className="relative w-20 h-20 rounded-full bg-gradient-to-tr from-[#b8860b]/20 to-amber-100 border-2 border-[#C59B27] flex items-center justify-center shadow-md">
+              <CheckCircle2 className="w-10 h-10 text-[#C59B27] stroke-[2.2]" />
+            </div>
+          </div>
+
+          <span className="text-[10px] font-mono font-bold tracking-widest uppercase text-[#C59B27] block mb-1">
+            EXECUTIVE PUBLISHER • LIVE CONFIRMATION
+          </span>
+          <h2 className="font-serif font-bold text-2xl md:text-3xl text-[#0F1E36] tracking-tight">
+            Listing Published Live!
+          </h2>
+          <p className="text-xs text-slate-600 mt-2 max-w-sm mx-auto leading-relaxed">
+            The property listing has been recorded in the database and is now live on the GrabMyKey storefront.
+          </p>
+
+          {/* Property Summary Card */}
+          <div className="mt-6 p-4 bg-white border border-slate-200/90 rounded-2xl text-left shadow-xs space-y-2">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-amber-50 text-[#C59B27] border border-amber-200 text-[10px] font-bold tracking-wider font-mono">
+                {property.category || property.type || 'LUXURY ASSET'}
+              </span>
+              <span className="font-mono text-xs font-bold text-[#0F1E36]">
+                Ref: {propListingCode}
+              </span>
+            </div>
+
+            <div>
+              <h3 className="font-serif font-bold text-base text-[#0F1E36] truncate">
+                {property.title}
+              </h3>
+              <p className="text-xs text-slate-500 flex items-center gap-1 mt-0.5">
+                <MapPin className="w-3.5 h-3.5 text-[#C59B27] shrink-0" />
+                <span className="truncate">{propLocation}</span>
+              </p>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-baseline justify-between">
+              <span className="text-[11px] text-slate-400 font-medium">Asking Price:</span>
+              <span className="font-serif font-bold text-lg text-[#C59B27]">
+                {property.price || (property.pricing?.expectedPrice ? `₹${property.pricing.expectedPrice.toLocaleString('en-IN')}` : 'Price on Request')}
+              </span>
+            </div>
+          </div>
+
+          {/* Action Buttons */}
+          <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2">
+            <button
+              type="button"
+              onClick={handleView}
+              className="w-full py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-[#C59B27] hover:bg-[#b0881e] text-white transition-all shadow-md cursor-pointer border border-[#C59B27]/50 flex items-center justify-center space-x-2"
+            >
+              <Eye className="w-4 h-4" />
+              <span>View Property</span>
+            </button>
+            <button
+              type="button"
+              onClick={handleBack}
+              className="w-full py-3 px-4 rounded-xl text-xs font-bold uppercase tracking-wider bg-white hover:bg-slate-100 text-[#0F1E36] border border-slate-300 transition-all shadow-xs cursor-pointer flex items-center justify-center space-x-2"
+            >
+              <ArrowLeft className="w-4 h-4 text-slate-500" />
+              <span>Back to Inventory</span>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 ```
 
@@ -11921,14 +13461,19 @@ export const getApiBaseUrl = () => {
     }
   }
 
-  // Support local network IP testing from mobile devices or other computers on LAN
-  if (
-    typeof window !== 'undefined' &&
-    window.location?.hostname &&
-    window.location.hostname !== 'localhost' &&
-    window.location.hostname !== '127.0.0.1'
-  ) {
-    return `http://${window.location.hostname}:5000/api`;
+  if (typeof window !== 'undefined' && window.location) {
+    const { hostname, protocol } = window.location;
+
+    // Production domain (HTTPS or grabmykey.in domain)
+    if (protocol === 'https:' || hostname.includes('grabmykey.in')) {
+      return '/api';
+    }
+
+    // Support local network IP testing from mobile devices or other computers on LAN
+    const isIpAddress = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+    if (isIpAddress && hostname !== '127.0.0.1') {
+      return `http://${hostname}:5000/api`;
+    }
   }
 
   return 'http://localhost:5000/api';
@@ -12078,6 +13623,7 @@ export function PropertyProvider({ children }) {
       properties,
       setProperties,
       isLoading,
+      setIsLoading,
       error,
       refreshProperties: loadPropertiesFromApi,
       reloadProperties: loadPropertiesFromApi,
@@ -12099,6 +13645,7 @@ export const useProperties = () => {
       properties: [],
       setProperties: () => {},
       isLoading: false,
+      setIsLoading: () => {},
       error: null,
       refreshProperties: async () => [],
       reloadProperties: async () => [],
@@ -12455,6 +14002,604 @@ createRoot(document.getElementById('root')).render(
 
 ```
 
+## File: `src/pages/AdminLogin.jsx`
+
+```jsx
+import React, { useState } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import { Lock, Mail, Eye, EyeOff, ShieldCheck, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { adminLogin } from '../api';
+
+export default function AdminLogin({ onLoginSuccess }) {
+  const navigate = useNavigate();
+
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(true);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMessage('');
+
+    if (!email.trim()) {
+      setErrorMessage('Please enter your administrative email address.');
+      return;
+    }
+    if (!password) {
+      setErrorMessage('Please enter your administrator password.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const res = await adminLogin(email.trim(), password);
+      if (res?.success && res.token) {
+        if (onLoginSuccess) {
+          onLoginSuccess(res.admin, res.token);
+        } else {
+          navigate('/manage-345');
+        }
+      } else {
+        setErrorMessage(res?.message || 'Authentication failed. Please verify your credentials.');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Authentication service unavailable. Please check your credentials.';
+      setErrorMessage(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#070D18] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(197,155,39,0.15),rgba(255,255,255,0))] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans">
+      
+      {/* Top Header Navigation */}
+      <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-4">
+        <Link
+          to="/"
+          className="inline-flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Website</span>
+        </Link>
+
+        <div className="flex items-center space-x-2">
+          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+          <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
+            Encrypted Session
+          </span>
+        </div>
+      </header>
+
+      {/* Main Authentication Card */}
+      <main className="w-full max-w-md mx-auto my-auto py-8">
+        <div className="bg-[#0D1829]/90 border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+          
+          {/* Subtle gold luxury ambient accent */}
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+
+          {/* Brand & Crest Header */}
+          <div className="text-center mb-8">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#13233D] to-[#0A1424] border border-[#C59B27]/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/40">
+              <ShieldCheck className="w-7 h-7 text-[#C59B27]" />
+            </div>
+            
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-[0.15em] text-white">
+              GRABMYKEY
+            </h1>
+            
+            <div className="inline-flex items-center space-x-1.5 mt-2 px-3 py-1 rounded-full bg-[#C59B27]/10 border border-[#C59B27]/30 text-[#C59B27] text-[10px] font-bold tracking-widest uppercase font-mono">
+              <span>ADMIN PORTAL • EXECUTIVE ACCESS</span>
+            </div>
+            
+            <p className="text-xs text-slate-400 mt-3 max-w-xs mx-auto leading-relaxed">
+              Sign in with your verified administrative credentials to access the central portfolio command suite.
+            </p>
+          </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="mb-6 p-3.5 rounded-xl bg-red-950/50 border border-red-800/80 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed font-medium">{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Login Form */}
+          <form onSubmit={handleSubmit} className="space-y-5">
+            
+            {/* Email Field */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Administrative Email
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <input
+                  type="email"
+                  required
+                  autoFocus
+                  placeholder="admin@grabmykey.in"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
+                />
+              </div>
+            </div>
+
+            {/* Password Field */}
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Password
+                </label>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <Lock className="w-4 h-4" />
+                </div>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  required
+                  placeholder="••••••••••••"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-11 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans tracking-wider"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword(!showPassword)}
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  title={showPassword ? 'Hide password' : 'Show password'}
+                >
+                  {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+            </div>
+
+            {/* Remember Me Option */}
+            <div className="flex items-center justify-between pt-1">
+              <label className="flex items-center space-x-2 text-xs text-slate-400 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                  className="w-3.5 h-3.5 rounded border-slate-700 bg-[#08101E] text-[#C59B27] focus:ring-0 cursor-pointer"
+                />
+                <span>Remember session on this device</span>
+              </label>
+            </div>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="w-full bg-gradient-to-r from-[#B8860B] via-[#C59B27] to-[#D4AF37] hover:brightness-110 active:brightness-95 disabled:opacity-60 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-black/40 flex items-center justify-center space-x-2 cursor-pointer mt-2"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Verifying Credentials...</span>
+                </>
+              ) : (
+                <span>Authenticate & Access Console</span>
+              )}
+            </button>
+          </form>
+
+          {/* Navigation to Signup */}
+          <div className="mt-8 pt-6 border-t border-slate-800 text-center space-y-3">
+            <p className="text-xs text-slate-400">
+              Need administrative clearance?{' '}
+              <Link
+                to="/admin/signup"
+                className="font-bold text-[#C59B27] hover:text-[#e0b945] underline underline-offset-4 transition-colors"
+              >
+                Register an Admin Profile →
+              </Link>
+            </p>
+
+            <p className="text-[10px] text-slate-500 font-mono">
+              Mangaluru Luxury Real Estate Portfolio • Strict RBAC Protection
+            </p>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer Notice */}
+      <footer className="text-center py-4 text-[11px] text-slate-500 font-mono">
+        © 2026 GrabMyKey. Authorized administrative personnel only.
+      </footer>
+    </div>
+  );
+}
+
+
+```
+
+## File: `src/pages/AdminSignup.jsx`
+
+```jsx
+import React, { useState, useMemo } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  ShieldCheck, User, Mail, Lock, KeyRound, Eye, EyeOff,
+  ArrowLeft, Check, AlertCircle, Loader2
+} from 'lucide-react';
+import { adminSignup } from '../api';
+
+export default function AdminSignup({ onSignupSuccess }) {
+  const navigate = useNavigate();
+
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [inviteKey, setInviteKey] = useState('');
+
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+
+  const [isLoading, setIsLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
+
+  // Password strength calculation
+  const passwordStrength = useMemo(() => {
+    if (!password) return { score: 0, label: 'Not Entered', color: 'bg-slate-700' };
+    let score = 0;
+    if (password.length >= 8) score += 1;
+    if (password.length >= 12) score += 1;
+    if (/[A-Z]/.test(password) && /[a-z]/.test(password)) score += 1;
+    if (/[0-9]/.test(password)) score += 1;
+    if (/[^A-Za-z0-9]/.test(password)) score += 1;
+
+    if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-red-500', width: 'w-1/4' };
+    if (score === 2) return { score: 2, label: 'Fair', color: 'bg-amber-500', width: 'w-2/4' };
+    if (score <= 4) return { score: 3, label: 'Strong', color: 'bg-[#C59B27]', width: 'w-3/4' };
+    return { score: 4, label: 'Executive Grade', color: 'bg-emerald-500', width: 'w-full' };
+  }, [password]);
+
+  // Real-time password match verification
+  const isMatch = useMemo(() => {
+    if (!confirmPassword) return null;
+    return password === confirmPassword;
+  }, [password, confirmPassword]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setErrorMessage('');
+    setSuccessMessage('');
+
+    if (!name.trim()) {
+      setErrorMessage('Please enter your full administrative name.');
+      return;
+    }
+    if (!email.trim()) {
+      setErrorMessage('Please provide a valid administrative email.');
+      return;
+    }
+    if (password.length < 8) {
+      setErrorMessage('Password must contain at least 8 characters.');
+      return;
+    }
+    if (password !== confirmPassword) {
+      setErrorMessage('Passwords do not match. Please verify both fields.');
+      return;
+    }
+
+    setIsLoading(true);
+
+    try {
+      const res = await adminSignup({
+        name: name.trim(),
+        email: email.trim(),
+        password,
+        inviteKey: inviteKey.trim()
+      });
+
+      if (res?.success && res.token) {
+        setSuccessMessage('Administrator profile established successfully. Redirecting...');
+        setTimeout(() => {
+          if (onSignupSuccess) {
+            onSignupSuccess(res.admin, res.token);
+          } else {
+            navigate('/manage-345');
+          }
+        }, 1200);
+      } else {
+        setErrorMessage(res?.message || 'Registration failed. Please check your credentials.');
+      }
+    } catch (err) {
+      const msg = err.response?.data?.message || err.message || 'Registration service encountered an error.';
+      setErrorMessage(msg);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#070D18] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(197,155,39,0.15),rgba(255,255,255,0))] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans">
+      
+      {/* Top Header Navigation */}
+      <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-4">
+        <Link
+          to="/"
+          className="inline-flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+        >
+          <ArrowLeft className="w-4 h-4" />
+          <span>Back to Website</span>
+        </Link>
+
+        <div className="flex items-center space-x-2">
+          <span className="w-2 h-2 rounded-full bg-[#C59B27] animate-pulse"></span>
+          <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
+            Invite-Gated Registration
+          </span>
+        </div>
+      </header>
+
+      {/* Main Signup Form Card */}
+      <main className="w-full max-w-lg mx-auto my-auto py-8">
+        <div className="bg-[#0D1829]/95 border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+          
+          {/* Subtle gold luxury ambient accent */}
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+
+          {/* Brand & Crest Header */}
+          <div className="text-center mb-7">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#13233D] to-[#0A1424] border border-[#C59B27]/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/40">
+              <ShieldCheck className="w-7 h-7 text-[#C59B27]" />
+            </div>
+
+            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-[0.15em] text-white">
+              GRABMYKEY
+            </h1>
+
+            <div className="inline-flex items-center space-x-1.5 mt-2 px-3 py-1 rounded-full bg-[#C59B27]/10 border border-[#C59B27]/30 text-[#C59B27] text-[10px] font-bold tracking-widest uppercase font-mono">
+              <span>ADMIN PORTAL • EXECUTIVE REGISTRATION</span>
+            </div>
+
+            <p className="text-xs text-slate-400 mt-3 max-w-sm mx-auto leading-relaxed">
+              Create an authorized administrative profile to manage Mangaluru real estate inventory, legal checklists, and inbound acquisitions.
+            </p>
+          </div>
+
+          {/* Error Banner */}
+          {errorMessage && (
+            <div className="mb-6 p-3.5 rounded-xl bg-red-950/60 border border-red-800 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span className="leading-relaxed font-medium">{errorMessage}</span>
+            </div>
+          )}
+
+          {/* Success Banner */}
+          {successMessage && (
+            <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs flex items-center space-x-2.5 animate-fadeIn">
+              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+              <span className="leading-relaxed font-medium">{successMessage}</span>
+            </div>
+          )}
+
+          {/* Signup Form */}
+          <form onSubmit={handleSubmit} className="space-y-4">
+            
+            {/* Full Name */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Full Administrative Name
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <User className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  required
+                  autoFocus
+                  placeholder="e.g., Executive Administrator"
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
+                />
+              </div>
+            </div>
+
+            {/* Email Field */}
+            <div className="space-y-1.5">
+              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                Official Administrative Email
+              </label>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <Mail className="w-4 h-4" />
+                </div>
+                <input
+                  type="email"
+                  required
+                  placeholder="admin@grabmykey.in"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
+                />
+              </div>
+            </div>
+
+            {/* Password & Confirm Password Grid */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+              
+              {/* Password */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Master Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Min. 8 characters"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                    title={showPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm Password */}
+              <div className="space-y-1.5">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Confirm Password
+                </label>
+                <div className="relative">
+                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                    <Lock className="w-4 h-4" />
+                  </div>
+                  <input
+                    type={showConfirmPassword ? 'text' : 'password'}
+                    required
+                    placeholder="Re-enter password"
+                    value={confirmPassword}
+                    onChange={(e) => setConfirmPassword(e.target.value)}
+                    className={`w-full bg-[#08101E] border rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none transition-all font-sans ${
+                      isMatch === false
+                        ? 'border-red-500 focus:ring-1 focus:ring-red-500'
+                        : isMatch === true
+                        ? 'border-emerald-500 focus:ring-1 focus:ring-emerald-500'
+                        : 'border-slate-700/80 focus:border-[#C59B27]'
+                    }`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                    title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                  >
+                    {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Password Strength Indicator & Match Badge */}
+            {password && (
+              <div className="p-3 bg-[#08101E] rounded-xl border border-slate-800 space-y-2">
+                <div className="flex items-center justify-between text-[11px]">
+                  <span className="text-slate-400">Password Strength:</span>
+                  <span className="font-semibold text-white font-mono">{passwordStrength.label}</span>
+                </div>
+                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                  <div className={`h-full ${passwordStrength.color} ${passwordStrength.width} transition-all duration-300`} />
+                </div>
+                
+                {confirmPassword && (
+                  <div className="flex items-center space-x-1.5 pt-1 text-[11px]">
+                    {isMatch ? (
+                      <span className="text-emerald-400 flex items-center space-x-1 font-medium">
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Passwords match securely</span>
+                      </span>
+                    ) : (
+                      <span className="text-red-400 flex items-center space-x-1 font-medium">
+                        <AlertCircle className="w-3.5 h-3.5" />
+                        <span>Passwords do not match</span>
+                      </span>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Admin Invite / Secret Key */}
+            <div className="space-y-1.5 pt-1">
+              <div className="flex items-center justify-between">
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                  Administrative Invite / Secret Key
+                </label>
+                <span className="text-[10px] text-[#C59B27] font-mono">
+                  Default: GMK-ADMIN-2026
+                </span>
+              </div>
+              <div className="relative">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                  <KeyRound className="w-4 h-4" />
+                </div>
+                <input
+                  type="text"
+                  placeholder="Enter authorized key (e.g., GMK-ADMIN-2026)"
+                  value={inviteKey}
+                  onChange={(e) => setInviteKey(e.target.value)}
+                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-mono"
+                />
+              </div>
+              <span className="text-[10px] text-slate-500 block leading-tight">
+                Required to authorize new administrative profiles. Contact superadmin if you need an access key.
+              </span>
+            </div>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={isLoading || (confirmPassword && !isMatch)}
+              className="w-full bg-gradient-to-r from-[#B8860B] via-[#C59B27] to-[#D4AF37] hover:brightness-110 active:brightness-95 disabled:opacity-50 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-black/40 flex items-center justify-center space-x-2 cursor-pointer mt-3"
+            >
+              {isLoading ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Registering Profile...</span>
+                </>
+              ) : (
+                <span>Initialize Administrator Profile</span>
+              )}
+            </button>
+          </form>
+
+          {/* Navigation to Login */}
+          <div className="mt-7 pt-5 border-t border-slate-800 text-center space-y-2">
+            <p className="text-xs text-slate-400">
+              Already hold an executive profile?{' '}
+              <Link
+                to="/admin/login"
+                className="font-bold text-[#C59B27] hover:text-[#e0b945] underline underline-offset-4 transition-colors"
+              >
+                Sign in to Admin Portal →
+              </Link>
+            </p>
+
+            <p className="text-[10px] text-slate-500 font-mono">
+              Strict RBAC Protocol • GrabMyKey Mangaluru Operations Suite
+            </p>
+          </div>
+        </div>
+      </main>
+
+      {/* Footer Notice */}
+      <footer className="text-center py-4 text-[11px] text-slate-500 font-mono">
+        © 2026 GrabMyKey. Authorized administrative registration portal.
+      </footer>
+    </div>
+  );
+}
+
+```
+
 ## File: `src/pages/Contact.jsx`
 
 ```jsx
@@ -12661,7 +14806,7 @@ export default function Home({
     const fetchProperties = async () => {
       try {
         setIsLoading(true);
-        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+        const apiUrl = API_ENDPOINTS.properties;
 
         const res = await fetch(apiUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -12728,7 +14873,7 @@ export default function Home({
   const featured = featuredProperty;
 
   const activeVideoUrl = getEmbedVideoUrl(featured?.videoUrl || featured?.heroVideoUrl, featured?.youtubeVideoId);
-  const featuredPoster = featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
+  const featuredPoster = featured?.coverImage || featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();
@@ -13372,17 +15517,18 @@ export default function ListProperty() {
 ## File: `src/pages/Properties.jsx`
 
 ```jsx
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useProperties } from '../context/PropertyContext';
+import { fetchProperties } from '../api';
 import { Search, MapPin, RefreshCw, Building2, Plus, Sparkles } from 'lucide-react';
 
 export default function Properties({ 
   properties: externalProperties, 
   onRefresh, 
-  isLoading = false,
+  isLoading: externalIsLoading = false,
   standalone = true 
 }) {
   const navigate = useNavigate();
@@ -13392,6 +15538,57 @@ export default function Properties({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedType, setSelectedType] = useState('All');
+  const [internalLoading, setInternalLoading] = useState(false);
+
+  const loading = externalIsLoading || internalLoading;
+
+  // Fresh data synchronization strictly from GET /api/properties (no stale localStorage caches)
+  const handleRefresh = useCallback(async () => {
+    setInternalLoading(true);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('grabmykey_properties');
+      }
+
+      if (onRefresh) {
+        await onRefresh();
+      } else if (contextData?.refreshProperties) {
+        await contextData.refreshProperties();
+      } else {
+        const res = await fetchProperties();
+        if (res?.data && contextData?.setProperties) {
+          contextData.setProperties(res.data);
+        }
+      }
+    } catch (err) {
+      console.warn('[Properties] Live backend sync error:', err?.message || err);
+    } finally {
+      setInternalLoading(false);
+    }
+  }, [onRefresh, contextData]);
+
+  // Fetch fresh properties from backend on mount and subscribe to updates
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('grabmykey_properties');
+    }
+
+    handleRefresh();
+
+    const handleSync = () => {
+      handleRefresh();
+    };
+
+    window.addEventListener('grabmykey_properties_updated', handleSync);
+    window.addEventListener('grabmykey_property_deleted', handleSync);
+    window.addEventListener('grabmykey_property_created', handleSync);
+
+    return () => {
+      window.removeEventListener('grabmykey_properties_updated', handleSync);
+      window.removeEventListener('grabmykey_property_deleted', handleSync);
+      window.removeEventListener('grabmykey_property_created', handleSync);
+    };
+  }, [handleRefresh]);
 
   const filteredProperties = useMemo(() => {
     if (!Array.isArray(properties)) return [];
@@ -13436,17 +15633,16 @@ export default function Properties({
             <Plus className="w-3.5 h-3.5 text-[#C59B27]" />
             <span>List Property</span>
           </Link>
-          {onRefresh && (
-            <button 
-              onClick={onRefresh}
-              disabled={isLoading}
-              className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-slate-900 border border-slate-200/80 hover:border-[#C59B27]/40 bg-white px-3.5 py-2 rounded-xl shadow-xs self-start md:self-auto transition-all duration-200 cursor-pointer font-sans"
-              title="Refresh database listings"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#C59B27]' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          )}
+          <button 
+            type="button"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-slate-900 border border-slate-200/80 hover:border-[#C59B27]/40 bg-white px-3.5 py-2 rounded-xl shadow-xs self-start md:self-auto transition-all duration-200 cursor-pointer font-sans"
+            title="Refresh database listings"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#C59B27]' : ''}`} />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -13542,9 +15738,9 @@ export default function Properties({
                 className="cursor-pointer"
               >
                 <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
-                  {(prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
+                  {(prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
                     <img 
-                      src={prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
+                      src={prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
                       alt={prop.title || 'Property'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />

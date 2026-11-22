@@ -4,7 +4,7 @@ import mongoose from 'mongoose';
 const ComponentItemSchema = new mongoose.Schema({
   categoryName: { type: String, required: true }, // e.g., "Interior & Living", "Building & Security"
   featureName: { type: String, required: true },  // e.g., "Modular Kitchen", "Power Backup"
-  isAvailable: { type: Boolean, default: false },  // true = ✓, false = —
+  isAvailable: { type: Boolean, default: false },  // true = Included, false = Not Included
   status: { type: String, default: 'Not Included' },
   descriptionNote: { type: String, default: "" } // e.g., "Teak finish with Faber chimney"
 }, { _id: true });
@@ -12,11 +12,10 @@ const ComponentItemSchema = new mongoose.Schema({
 // 2. Dynamic Legal Audit Item Schema
 const LegalAuditItemSchema = new mongoose.Schema({
   documentName: { type: String, required: true }, // e.g., "Encumbrance Certificate (EC)", "Khata / Possession"
-  category: { type: String, default: 'General Title' }, // "Ownership", "Municipal", "Tax", "Custom"
-  verifiedStatus: { 
-    type: String, 
-    enum: ['Verified', 'Pending', 'Issue Flagged', 'Not Applicable'], 
-    default: 'Pending' 
+  category: {
+    type: String,
+    enum: ['Verified', 'Pending', 'Issue Flagged', 'Not Applicable'],
+    default: 'Pending'
   },
   verificationNote: { type: String, default: "" }, // e.g., "30-Year Clear EC verified via Kaveri portal"
   verifiedDate: { type: Date, default: Date.now },
@@ -26,10 +25,10 @@ const LegalAuditItemSchema = new mongoose.Schema({
 // 3. Dynamic Manual Strategic Transit & Infrastructure Item Schema
 const TransitItemSchema = new mongoose.Schema({
   landmarkName: { type: String, required: true },
-  travelMode: { 
-    type: String, 
-    enum: ['Walk', 'Drive', 'Transit', 'Flight'], 
-    default: 'Drive' 
+  travelMode: {
+    type: String,
+    enum: ['Walk', 'Drive', 'Transit', 'Flight'],
+    default: 'Drive'
   },
   distanceText: { type: String, required: true },
   durationText: { type: String, required: true },
@@ -54,17 +53,18 @@ const legalChecklistItemSchema = new mongoose.Schema({
 const PropertySchema = new mongoose.Schema({
   _id: { type: mongoose.Schema.Types.Mixed },
   id: { type: String },
+  listingCode: { type: String, trim: true },
   title: { type: String, required: true, trim: true },
   slug: { type: String, required: true, unique: true, trim: true },
   city: { type: String, enum: ['Mangaluru'], default: 'Mangaluru', required: true },
   locality: { type: String, required: true, trim: true },
-  category: { 
-    type: String, 
-    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'], 
-    required: true 
+  category: {
+    type: String,
+    enum: ['Apartment', 'Villa', 'Independent House', 'Commercial', 'Land/Plot', 'Plot', 'Estate'],
+    required: true
   },
   dealType: { type: String, enum: ['Resale', 'Rental', 'New Launch', 'Direct Sale'], required: true, default: 'Resale' },
-  
+
   pricing: {
     expectedPrice: { type: Number, default: 0 },
     isNegotiable: { type: Boolean, default: false },
@@ -75,8 +75,8 @@ const PropertySchema = new mongoose.Schema({
     bedrooms: { type: Number, default: 0 },
     bathrooms: { type: Number, default: 0 },
     carpetAreaSqFt: { type: Number, default: 0 },
-    furnishingStatus: { 
-      type: String, 
+    furnishingStatus: {
+      type: String,
       enum: ['Fully Furnished', 'Semi-Furnished', 'Unfurnished', 'Furnished'],
       default: 'Unfurnished'
     },
@@ -85,6 +85,7 @@ const PropertySchema = new mongoose.Schema({
   },
 
   youtubeVideoId: { type: String, default: '' },
+  coverImage: { type: String, default: '' },
   galleryImages: { type: [String], default: [] },
   description: { type: String, default: '' },
 
@@ -160,6 +161,17 @@ const formatInrPrice = (amount) => {
 
 // Auto-sync backward compatibility and new schema fields before saving
 PropertySchema.pre('save', function () {
+  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-345)
+  if (!this.listingCode) {
+    if (this._id) {
+      const idStr = String(this._id).replace(/[^a-zA-Z0-9]/g, '');
+      const shortId = idStr.slice(-4).toUpperCase();
+      this.listingCode = `GMK-MLR-${shortId || Math.floor(100 + Math.random() * 900)}`;
+    } else {
+      this.listingCode = `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+    }
+  }
+
   // Generate slug if absent
   if (!this.slug && this.title) {
     this.slug = this.title
@@ -252,11 +264,20 @@ PropertySchema.pre('save', function () {
     this.area = `${this.carpetArea} sq.ft`;
   }
 
-  // Sync images and galleryImages
-  if ((!this.galleryImages || this.galleryImages.length === 0) && Array.isArray(this.images) && this.images.length > 0) {
-    this.galleryImages = [...this.images];
+  // Sync images, galleryImages and coverImage
+  if (!this.coverImage && Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
+    this.coverImage = this.galleryImages[0];
   }
-  if ((!this.images || this.images.length === 0) && Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
+  if (!this.coverImage && Array.isArray(this.images) && this.images.length > 0) {
+    this.coverImage = this.images[0];
+  }
+  if (this.coverImage) {
+    const list = Array.isArray(this.galleryImages) ? this.galleryImages : [];
+    this.images = [this.coverImage, ...list.filter(img => img !== this.coverImage)];
+    if (!this.galleryImages || this.galleryImages.length === 0) {
+      this.galleryImages = [...this.images];
+    }
+  } else if (Array.isArray(this.galleryImages) && this.galleryImages.length > 0) {
     this.images = [...this.galleryImages];
   }
 

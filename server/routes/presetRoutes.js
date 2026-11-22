@@ -1,6 +1,7 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import MasterPreset from '../models/MasterPreset.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -507,8 +508,8 @@ router.get('/', async (req, res) => {
   }
 });
 
-// POST /api/presets - Create a new preset
-router.post('/', async (req, res) => {
+// POST /api/presets - Create a new preset (Admin only)
+router.post('/', requireAdminAuth, async (req, res) => {
   try {
     const {
       presetType,
@@ -569,8 +570,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PUT /api/presets/:id - Update an existing preset
-router.put('/:id', async (req, res) => {
+// PUT /api/presets/:id - Update an existing preset (Admin only)
+router.put('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
     const updateData = { ...req.body };
@@ -618,8 +619,8 @@ router.put('/:id', async (req, res) => {
   }
 });
 
-// DELETE /api/presets/:id - Delete a preset
-router.delete('/:id', async (req, res) => {
+// DELETE /api/presets/:id - Delete a preset (Admin only)
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { id } = req.params;
 
@@ -658,8 +659,8 @@ router.delete('/:id', async (req, res) => {
   }
 });
 
-// POST /api/presets/seed-defaults - Force reset to default presets
-router.post('/seed-defaults', async (req, res) => {
+// POST /api/presets/seed-defaults - Force reset to default presets (Admin only)
+router.post('/seed-defaults', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState === 1) {
       await MasterPreset.deleteMany({});

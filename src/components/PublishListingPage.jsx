@@ -4,11 +4,13 @@ import {
   ArrowLeft, ArrowRight, RotateCw, ShieldCheck, Database,
   LogOut, PlusCircle, Trash2, Video, Upload, FileText,
   X, Check, Lock, ChevronRight, Layers, FileCheck, CheckCircle2,
-  Maximize2, Minus, ExternalLink, Play, RefreshCw, MapPin
+  Maximize2, Minus, ExternalLink, Play, RefreshCw, MapPin,
+  Image as ImageIcon, Star
 } from 'lucide-react';
 import { API_ENDPOINTS } from '../config/api';
 import { getAssetSpecPresets } from '../defaultPresets';
 import AddCustomItemModal from './AddCustomItemModal';
+import PublishSuccessModal from './PublishSuccessModal';
 
 export default function PublishListingPage({ onExit, onSaveProperty }) {
   const navigate = useNavigate();
@@ -54,6 +56,103 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const [showYoutubePicker, setShowYoutubePicker] = useState(false);
   const [channelVideos] = useState([]);
   const [uploadedFiles, setUploadedFiles] = useState([]);
+
+  // Dedicated Cover Photo & Gallery Upload State
+  const [coverPhoto, setCoverPhoto] = useState(null); // { id, url, name, size }
+  const [galleryPhotos, setGalleryPhotos] = useState([]); // [{ id, url, name, size }]
+  const [legalDocuments, setLegalDocuments] = useState([]);
+
+  // Dedicated Publish Success Popup Modal State
+  const [publishedRecord, setPublishedRecord] = useState(null);
+  const [showPublishSuccessModal, setShowPublishSuccessModal] = useState(false);
+
+  // Client-Side Canvas Image Compression Helper (Max 1600px width, 0.85 quality)
+  const compressImageFile = (file, maxWidth = 1600, quality = 0.85) => {
+    return new Promise((resolve) => {
+      if (!file || !file.type.startsWith('image/')) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
+          resolve({
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            url: dataUrl,
+            name: file.name,
+            size: `${Math.round((dataUrl.length * 0.75) / 1024)} KB`
+          });
+        };
+        img.onerror = () => {
+          resolve({
+            id: `${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+            url: e.target.result,
+            name: file.name,
+            size: `${(file.size / 1024).toFixed(0)} KB`
+          });
+        };
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Primary Cover Photo Upload Handlers
+  const handleCoverPhotoUpload = async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const processed = await compressImageFile(e.target.files[0]);
+      if (processed) {
+        setCoverPhoto(processed);
+      }
+    }
+  };
+
+  const handleRemoveCoverPhoto = () => {
+    setCoverPhoto(null);
+  };
+
+  // Property Gallery Photos Upload Handlers
+  const handleGalleryUpload = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      const results = await Promise.all(files.map(f => compressImageFile(f)));
+      const valid = results.filter(Boolean);
+      setGalleryPhotos(prev => [...prev, ...valid]);
+    }
+  };
+
+  const handleRemoveGalleryPhoto = (idx) => {
+    setGalleryPhotos(prev => prev.filter((_, i) => i !== idx));
+  };
+
+  const handleLegalDocUpload = (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const newDocs = Array.from(e.target.files).map(f => ({
+        name: f.name,
+        size: `${(f.size / (1024 * 1024)).toFixed(1)} MB`,
+        type: 'document'
+      }));
+      setLegalDocuments(prev => [...prev, ...newDocs]);
+    }
+  };
+
+  const handleRemoveLegalDoc = (idx) => {
+    setLegalDocuments(prev => prev.filter((_, i) => i !== idx));
+  };
 
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -177,7 +276,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: '30-Year Parent Deed Chain Audit',
       category: 'Ownership',
       activeStatus: 'Cleared',
-      activeLabel: '✓ Cleared',
+      activeLabel: 'Cleared',
       verifiedStatus: 'Pending',
       description: 'Chain of title deeds dating back 30 years verified without break in title',
       verificationNote: '30-Year Parent Deed Chain Audit',
@@ -189,7 +288,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: '30-Year Encumbrance Certificate',
       category: 'Ownership',
       activeStatus: 'Nil EC verified',
-      activeLabel: '✓ Nil EC verified',
+      activeLabel: 'Nil EC verified',
       verifiedStatus: 'Pending',
       description: 'Form 15 Nil Encumbrance Certificate verified through Kaveri / Sub-Registrar',
       verificationNote: '30-Year Encumbrance Certificate (Nil EC verified)',
@@ -201,7 +300,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'Revenue RTC / Mutation Compliance',
       category: 'Ownership',
       activeStatus: 'Verified',
-      activeLabel: '✓ Verified',
+      activeLabel: 'Verified',
       verifiedStatus: 'Pending',
       description: 'Pahani / RTC mutation extract reflects unambiguous vendor ownership',
       verificationNote: 'Revenue RTC / Mutation Compliance (Verified)',
@@ -213,7 +312,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'MCC / Local Body Plan Approvals',
       category: 'Municipal',
       activeStatus: 'Compliant',
-      activeLabel: '✓ Compliant',
+      activeLabel: 'Compliant',
       verifiedStatus: 'Pending',
       description: 'Mangaluru City Corporation sanctioned blueprint and occupancy certificate',
       verificationNote: 'MCC / Local Body Plan Approvals (Compliant)',
@@ -225,7 +324,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: 'Physical Boundary DGPS Survey',
       category: 'Ownership',
       activeStatus: 'Cleared',
-      activeLabel: '✓ Cleared',
+      activeLabel: 'Cleared',
       verifiedStatus: 'Pending',
       description: 'Field Measurement Book (FMB) coordinates match physical compound boundary',
       verificationNote: 'Physical Boundary DGPS Survey (Cleared)',
@@ -376,7 +475,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       documentName: docName,
       category: 'Custom Clearance',
       activeStatus: 'Verified',
-      activeLabel: '✓ Verified',
+      activeLabel: 'Verified',
       verifiedStatus: legalModalData.verifiedStatus || 'Pending Audit',
       description: (legalModalData.verificationNote || '').trim() || 'Audited statutory clearance on record',
       verificationNote: (legalModalData.verificationNote || '').trim() || 'Audited clearance on record',
@@ -439,9 +538,18 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       dgpsSurveyVerification: legalChecklist.find(i => i.id === 'dgpsSurveyVerification')?.verifiedStatus === 'Cleared' || legalChecklist.find(i => i.id === 'dgpsSurveyVerification')?.verifiedStatus === 'Verified' ? 'Cleared' : 'Pending'
     };
 
+    const resolvedCover = coverPhoto?.url || (galleryPhotos[0]?.url || '');
+    const galleryUrls = galleryPhotos.map(p => p.url);
+    const orderedGalleryImages = resolvedCover
+      ? [resolvedCover, ...galleryUrls.filter(u => u !== resolvedCover)]
+      : (galleryUrls.length > 0 ? galleryUrls : (uploadedFiles.filter(f => f.type === 'image').map(f => f.name)));
+
+    const generatedListingCode = `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+
     const formData = {
       // Direct Top-Level Keys matching Mongoose schema in server/models/Property.js
       title: title.trim(),
+      listingCode: generatedListingCode,
       price: price || formatDisplayPrice(rawPriceNum),
       priceRaw: rawPriceNum,
       category: isLand ? 'Land/Plot' : assetCategory,
@@ -449,6 +557,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       carpetArea: superArea || '',
       heroVideoUrl: videoUrl || '',
       videoUrl: videoUrl || '',
+      coverImage: resolvedCover,
+      galleryImages: galleryUrls,
+      images: orderedGalleryImages,
       slug: generatedSlug,
       city: 'Mangaluru',
       dealType: 'Resale',
@@ -466,7 +577,6 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         totalFloors: '1'
       },
       youtubeVideoId: videoUrl?.includes('v=') ? videoUrl.split('v=')[1]?.substring(0, 11) : (videoUrl?.includes('youtu.be/') ? videoUrl.split('youtu.be/')[1]?.substring(0, 11) : ''),
-      galleryImages: uploadedFiles.filter(f => f.type === 'image').map(f => f.name),
       description: description || '',
       componentsMatrix: [
         ...componentsMatrix.map(item => ({
@@ -515,7 +625,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       ]
     };
 
-    const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+    const apiUrl = API_ENDPOINTS.properties;
 
     try {
       const response = await fetch(apiUrl, {
@@ -538,8 +648,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         window.dispatchEvent(new CustomEvent('grabmykey_property_created', { detail: savedDoc }));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
 
-        // On HTTP 201 success, navigate to /manage-345 so the new listing immediately populates in the database inventory count
-        navigate('/manage-345');
+        // Dedicated Publish Success Popup Modal (Zero Native Alerts)
+        setPublishedRecord({ ...formData, ...savedDoc });
+        setShowPublishSuccessModal(true);
         return;
       } else {
         const errData = await response.json().catch(() => ({}));
@@ -624,8 +735,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                   <button
                     type="button"
                     onClick={onExit || (() => {
-                      localStorage.removeItem('adminToken');
-                      navigate('/');
+                      localStorage.removeItem('gmk_admin_jwt');
+                      localStorage.removeItem('gmk_admin_user');
+                      navigate('/admin/login');
                     })}
                     className="bg-[#0a1d37] text-white hover:bg-[#061426] px-4 py-2 rounded-xl text-xs font-semibold uppercase tracking-wider transition-all shadow-sm flex items-center space-x-1.5 cursor-pointer"
                   >
@@ -687,7 +799,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                       className="inline-flex items-center space-x-1.5 text-xs font-semibold text-slate-700 hover:text-[#0a1d37] transition-colors bg-white border border-slate-200 rounded-lg px-3 py-1.5 shadow-2xs hover:bg-slate-50 cursor-pointer"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" />
-                      <span>← Back to Inventory</span>
+                      <span>Back to Inventory</span>
                     </button>
                     <span className="text-[10px] font-mono uppercase tracking-widest text-[#b8860b] font-bold">
                       EXECUTIVE MANAGEMENT SUITE
@@ -1010,53 +1122,220 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                         )}
                       </div>
 
-                      {/* LOCAL FILE UPLOADS: image/*, .pdf */}
-                      <div>
-                        <label className="block text-xs font-semibold text-slate-700 mb-1.5">
-                          High-Resolution Photography & Document Attachments
-                        </label>
-                        
-                        <div className="border-2 border-dashed border-slate-300 hover:border-[#C59B27] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
-                          <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#C59B27] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                      {/* 1. DEDICATED PRIMARY COVER PHOTO UPLOAD ZONE */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                              Primary Cover Photo <span className="text-red-500">*</span>
+                            </label>
+                            <span className="text-[11px] text-slate-500">
+                              The hero photograph featured on catalog cards, homepage highlights, and page headers (.jpg, .png, .webp).
+                            </span>
+                          </div>
+                          {coverPhoto && (
+                            <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                              <Check className="w-3 h-3" />
+                              <span>Cover Selected</span>
+                            </span>
+                          )}
+                        </div>
+
+                        {coverPhoto ? (
+                          /* Instant Image Preview Card */
+                          <div className="relative border-2 border-emerald-500/40 bg-white rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+                            <div className="relative w-full sm:w-56 h-36 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                              <img
+                                src={coverPhoto.url}
+                                alt={coverPhoto.name || 'Primary Cover'}
+                                className="w-full h-full object-cover"
+                              />
+                              <span className="absolute top-2 left-2 bg-[#C59B27] text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-sm font-mono flex items-center space-x-1">
+                                <Star className="w-2.5 h-2.5 fill-current" />
+                                <span>PRIMARY COVER</span>
+                              </span>
+                            </div>
+                            <div className="flex-1 w-full space-y-2">
+                              <div>
+                                <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                  Active Catalog Hero
+                                </span>
+                                <h4 className="text-sm font-bold text-[#0F1E36] mt-1.5 truncate" title={coverPhoto.name}>
+                                  {coverPhoto.name || 'Cover Photo'}
+                                </h4>
+                                <span className="text-xs text-slate-500 font-mono block mt-0.5">
+                                  Size: {coverPhoto.size} • Format: Optimized Image
+                                </span>
+                              </div>
+                              <div className="flex items-center space-x-3 pt-2">
+                                <label className="inline-flex items-center space-x-1.5 bg-[#FAF8F5] hover:bg-slate-100 text-[#0F1E36] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-300 transition-all">
+                                  <Upload className="w-3.5 h-3.5" />
+                                  <span>Replace Photo</span>
+                                  <input
+                                    type="file"
+                                    accept="image/jpeg,image/png,image/webp"
+                                    onChange={handleCoverPhotoUpload}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={handleRemoveCoverPhoto}
+                                  className="inline-flex items-center space-x-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3.5 py-2 rounded-xl text-xs font-semibold border border-red-200 transition-all cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Remove Photo</span>
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* Dedicated Single Dropzone */
+                          <div className="border-2 border-dashed border-amber-200/90 hover:border-[#C59B27] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
+                            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#C59B27] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                              <ImageIcon className="w-6 h-6" />
+                            </div>
+                            <h5 className="text-xs font-bold text-[#0F1E36] mb-1">
+                              Upload Primary Cover Photo (.jpg, .png, .webp)
+                            </h5>
+                            <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                              Select a single hero photograph to represent this property across the catalog and homepage.
+                            </p>
+                            <label className="inline-flex items-center space-x-2 bg-[#C59B27] hover:bg-[#b0881e] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#C59B27]/40">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Select Primary Cover Photo</span>
+                              <input
+                                type="file"
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handleCoverPhotoUpload}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* 2. DEDICATED PROPERTY GALLERY PHOTOS MULTI-FILE UPLOAD ZONE */}
+                      <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                              Property Gallery Photos
+                            </label>
+                            <span className="text-[11px] text-slate-500">
+                              Upload additional interior, exterior, elevation, and amenity views (.jpg, .png, .webp).
+                            </span>
+                          </div>
+                          {galleryPhotos.length > 0 && (
+                            <span className="text-[11px] font-mono font-bold text-[#C59B27] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                              {galleryPhotos.length} Photo{galleryPhotos.length !== 1 ? 's' : ''} Uploaded
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Multi-file Gallery Dropzone */}
+                        <div className="border-2 border-dashed border-slate-300 hover:border-[#0a1d37] rounded-2xl p-6 text-center bg-[#FAF8F5] transition-all group">
+                          <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-100 text-[#0a1d37] border border-slate-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
                             <Upload className="w-6 h-6" />
                           </div>
                           <h5 className="text-xs font-bold text-[#0F1E36] mb-1">
-                            Upload Local Files (.jpg, .png, .pdf)
+                            Upload Gallery Photos (.jpg, .png, .webp)
                           </h5>
                           <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
-                            Drag and drop local asset photos or legal deed PDFs directly, or browse files from your disk.
+                            Select multiple photos from your device to populate the property photo gallery carousel.
                           </p>
-                          <label className="inline-flex items-center space-x-2 bg-[#0F1E36] hover:bg-[#081220] text-white px-5 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider cursor-pointer shadow-sm transition-all">
-                            <Upload className="w-3.5 h-3.5 text-[#e6ca65]" />
-                            <span>Browse Files</span>
+                          <label className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061426] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#0a1d37]/40">
+                            <Upload className="w-3.5 h-3.5" />
+                            <span>Select Gallery Photos</span>
                             <input
                               type="file"
                               multiple
-                              accept="image/*,.pdf"
-                              onChange={handleFileUpload}
+                              accept="image/jpeg,image/png,image/webp"
+                              onChange={handleGalleryUpload}
                               className="hidden"
                             />
                           </label>
                         </div>
 
-                        {/* Uploaded File Chips */}
-                        {uploadedFiles.length > 0 && (
-                          <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                            {uploadedFiles.map((file, idx) => (
+                        {/* Clean Gallery Thumbnails Grid with Individual Remove Buttons */}
+                        {galleryPhotos.length > 0 && (
+                          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3 pt-2">
+                            {galleryPhotos.map((photo, idx) => (
+                              <div
+                                key={photo.id || idx}
+                                className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white shadow-2xs hover:border-[#C59B27] transition-all"
+                              >
+                                <div className="h-28 w-full overflow-hidden bg-slate-100 relative">
+                                  <img
+                                    src={photo.url}
+                                    alt={photo.name || `Gallery photo ${idx + 1}`}
+                                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                  />
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveGalleryPhoto(idx)}
+                                    className="absolute top-2 right-2 p-1.5 bg-black/75 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer shadow-sm"
+                                    title="Remove photo"
+                                  >
+                                    <X className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                                <div className="p-2">
+                                  <p className="text-[11px] font-medium text-[#0F1E36] truncate" title={photo.name}>
+                                    {photo.name || `Photo #${idx + 1}`}
+                                  </p>
+                                  <span className="text-[10px] text-slate-400 font-mono block">{photo.size}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* B. SEPARATE STATUTORY LEGAL DEEDS & DOCUMENT ATTACHMENTS (.PDF) */}
+                      <div className="space-y-3 pt-4 border-t border-slate-200/80">
+                        <div>
+                          <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                            Statutory Legal Deeds & Audit Attachments (.pdf)
+                          </label>
+                          <span className="text-[11px] text-slate-500">
+                            Attach statutory Mother Deeds, 30-Year Encumbrance Certificates, RTC extracts, and MCC sanction plans.
+                          </span>
+                        </div>
+
+                        <div className="border border-dashed border-slate-300 hover:border-slate-400 rounded-2xl p-5 text-center bg-white transition-all">
+                          <FileText className="w-6 h-6 text-slate-400 mx-auto mb-2" />
+                          <p className="text-xs font-semibold text-slate-700 mb-2">
+                            Select Title Deeds & Statutory Verification PDFs
+                          </p>
+                          <label className="inline-flex items-center space-x-1.5 bg-white hover:bg-slate-50 text-[#0a1d37] border border-slate-300 px-4 py-2 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-2xs transition-all">
+                            <Upload className="w-3 h-3" />
+                            <span>Browse Document PDFs</span>
+                            <input
+                              type="file"
+                              multiple
+                              accept=".pdf,application/pdf"
+                              onChange={handleLegalDocUpload}
+                              className="hidden"
+                            />
+                          </label>
+                        </div>
+
+                        {/* Uploaded Legal Document Chips */}
+                        {legalDocuments.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 pt-1">
+                            {legalDocuments.map((doc, idx) => (
                               <div key={idx} className="flex items-center space-x-2 p-2.5 bg-white border border-slate-200 rounded-xl text-xs shadow-2xs">
-                                <FileText className="w-4 h-4 text-[#C59B27] shrink-0" />
+                                <FileCheck className="w-4 h-4 text-[#C59B27] shrink-0" />
                                 <div className="min-w-0 flex-1">
-                                  <span className="truncate block text-slate-800 font-medium text-[11px]">{file.name}</span>
-                                  <span className="text-[10px] text-slate-400 font-mono">{file.size}</span>
+                                  <span className="truncate block text-slate-800 font-medium text-[11px]">{doc.name}</span>
+                                  <span className="text-[10px] text-slate-400 font-mono">{doc.size}</span>
                                 </div>
                                 <button
                                   type="button"
-                                  onClick={(e) => {
-                                    e.preventDefault();
-                                    removeUploadedFile(idx);
-                                  }}
+                                  onClick={() => handleRemoveLegalDoc(idx)}
                                   className="text-slate-400 hover:text-red-500 p-1 rounded hover:bg-red-50 shrink-0 cursor-pointer"
-                                  title="Remove attachment"
+                                  title="Remove document"
                                 >
                                   <X className="w-3.5 h-3.5" />
                                 </button>
@@ -1085,7 +1364,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                               </h3>
                             </div>
                             <p className="text-xs text-slate-500 mt-0.5">
-                              Grouped specifications with availability toggles (✓ / —) and optional custom descriptive notes.
+                              Grouped specifications with availability toggles and optional custom descriptive notes.
                             </p>
                           </div>
                           <div className="flex items-center space-x-2">
@@ -1154,14 +1433,18 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                             <button
                                               type="button"
                                               onClick={() => handleToggleFeature(item.originalIdx)}
-                                              title={isIncluded ? "Click to mark Not Included (—)" : "Click to mark Included (✓)"}
-                                              className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs ${
+                                              title={isIncluded ? "Click to mark Not Included" : "Click to mark Included"}
+                                              className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs border ${
                                                 isIncluded
-                                                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                                                  : 'bg-slate-200 text-slate-600 hover:bg-slate-300'
+                                                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100'
+                                                  : 'bg-stone-100 text-stone-500 border-stone-200 hover:bg-stone-200'
                                               }`}
                                             >
-                                              <span>{isIncluded ? '✓' : '—'}</span>
+                                              {isIncluded ? (
+                                                <Check className="w-3 h-3 stroke-[2.5] text-emerald-600" />
+                                              ) : (
+                                                <X className="w-3 h-3 stroke-[2.5] text-stone-400" />
+                                              )}
                                               <span className="text-[10px] uppercase font-mono">{isIncluded ? 'Included' : 'Not Included'}</span>
                                             </button>
                                             <span className="text-xs font-bold text-[#0a1d37] truncate" title={item.featureName}>
@@ -1427,7 +1710,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                         ? 'bg-slate-100 text-slate-500 border-slate-200'
                                         : 'bg-slate-100 text-slate-600 border-slate-200'
                                   }`}>
-                                    {isPassed ? (item.activeLabel || '✓ Verified') : item.verifiedStatus === 'Not Applicable' ? '— Not Applicable' : '⏳ Pending'}
+                                    {isPassed ? (item.activeLabel || 'Verified') : item.verifiedStatus === 'Not Applicable' ? 'Not Applicable' : 'Pending'}
                                   </span>
                                 </div>
                                 <p className="text-[11px] text-slate-500 pl-4">{item.description || item.verificationNote}</p>
@@ -1462,7 +1745,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                           : 'bg-white text-emerald-700 border-slate-200 hover:bg-emerald-50'
                                       }`}
                                     >
-                                      {item.activeLabel || '✓ Cleared'}
+                                      {item.activeLabel || 'Cleared'}
                                     </button>
                                   </>
                                 ) : (
@@ -1472,9 +1755,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
                                       onChange={(e) => handleUpdateLegalStatus(idx, e.target.value)}
                                       className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs font-bold text-[#0a1d37] focus:border-[#C59B27] focus:outline-none cursor-pointer"
                                     >
-                                      <option value="Verified">✓ Verified</option>
-                                      <option value="Pending Audit">⏳ Pending Audit</option>
-                                      <option value="Not Applicable">— Not Applicable</option>
+                                      <option value="Verified">Verified</option>
+                                      <option value="Pending Audit">Pending Audit</option>
+                                      <option value="Not Applicable">Not Applicable</option>
                                     </select>
                                     <button
                                       type="button"
@@ -1699,7 +1982,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
               onChange={e => setCategoryModalData({ ...categoryModalData, isIncluded: e.target.checked })}
               className="w-4 h-4 text-[#C59B27] rounded border-slate-300 focus:ring-[#C59B27]"
             />
-            <span className="text-xs font-medium text-slate-700">Mark feature as Included (✓)</span>
+            <span className="text-xs font-medium text-slate-700">Mark feature as Included</span>
           </label>
         </div>
       </AddCustomItemModal>
@@ -1746,7 +2029,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             onChange={e => setFeatureModalData({ ...featureModalData, isAvailable: e.target.checked })}
             className="w-4 h-4 text-[#C59B27] rounded border-slate-300 focus:ring-[#C59B27]"
           />
-          <span className="text-xs font-medium text-slate-700">Mark feature as Included (✓)</span>
+          <span className="text-xs font-medium text-slate-700">Mark feature as Included</span>
         </label>
       </AddCustomItemModal>
 
@@ -1782,9 +2065,9 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             onChange={e => setLegalModalData({ ...legalModalData, verifiedStatus: e.target.value })}
             className="w-full bg-white border border-slate-300 rounded-xl px-4 py-2.5 text-xs font-semibold text-[#1A1A1A] focus:border-[#C59B27] focus:outline-none cursor-pointer"
           >
-            <option value="Verified">✓ Verified</option>
-            <option value="Pending Audit">⏳ Pending Audit</option>
-            <option value="Not Applicable">— Not Applicable</option>
+            <option value="Verified">Verified</option>
+            <option value="Pending Audit">Pending Audit</option>
+            <option value="Not Applicable">Not Applicable</option>
           </select>
         </div>
         <div>
@@ -1800,6 +2083,22 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
           />
         </div>
       </AddCustomItemModal>
+
+      {/* DEDICATED PUBLISH SUCCESS POPUP MODAL */}
+      <PublishSuccessModal
+        isOpen={showPublishSuccessModal}
+        onClose={() => setShowPublishSuccessModal(false)}
+        property={publishedRecord}
+        onViewProperty={(prop) => {
+          setShowPublishSuccessModal(false);
+          navigate(`/property/${prop.slug || prop.id || prop._id}`);
+        }}
+        onBackToInventory={() => {
+          setShowPublishSuccessModal(false);
+          if (onExit) onExit();
+          else navigate('/manage-345');
+        }}
+      />
 
     </div>
   );

@@ -1,13 +1,14 @@
 import express from 'express';
 import mongoose from 'mongoose';
 import Lead from '../models/Lead.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
 let memoryLeads = [];
 
 // GET /api/leads - Fetch all seller requests (Admin only)
-router.get('/', async (req, res) => {
+router.get('/', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       return res.json({
@@ -97,8 +98,8 @@ router.post('/', async (req, res) => {
   }
 });
 
-// PATCH /api/leads/:id - Update lead status
-router.patch('/:id', async (req, res) => {
+// PATCH /api/leads/:id - Update lead status (Admin only)
+router.patch('/:id', requireAdminAuth, async (req, res) => {
   try {
     const { status } = req.body;
 
@@ -146,7 +147,7 @@ router.patch('/:id', async (req, res) => {
 });
 
 // DELETE /api/leads/:id - Delete lead (Admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
     if (mongoose.connection.readyState !== 1) {
       memoryLeads = memoryLeads.filter(l => String(l._id) !== String(req.params.id) && String(l.id) !== String(req.params.id));

@@ -1,14 +1,15 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/Navbar';
 import Footer from '../components/Footer';
 import { useProperties } from '../context/PropertyContext';
+import { fetchProperties } from '../api';
 import { Search, MapPin, RefreshCw, Building2, Plus, Sparkles } from 'lucide-react';
 
 export default function Properties({ 
   properties: externalProperties, 
   onRefresh, 
-  isLoading = false,
+  isLoading: externalIsLoading = false,
   standalone = true 
 }) {
   const navigate = useNavigate();
@@ -18,6 +19,57 @@ export default function Properties({
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRegion, setSelectedRegion] = useState('All');
   const [selectedType, setSelectedType] = useState('All');
+  const [internalLoading, setInternalLoading] = useState(false);
+
+  const loading = externalIsLoading || internalLoading;
+
+  // Fresh data synchronization strictly from GET /api/properties (no stale localStorage caches)
+  const handleRefresh = useCallback(async () => {
+    setInternalLoading(true);
+    try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('grabmykey_properties');
+      }
+
+      if (onRefresh) {
+        await onRefresh();
+      } else if (contextData?.refreshProperties) {
+        await contextData.refreshProperties();
+      } else {
+        const res = await fetchProperties();
+        if (res?.data && contextData?.setProperties) {
+          contextData.setProperties(res.data);
+        }
+      }
+    } catch (err) {
+      console.warn('[Properties] Live backend sync error:', err?.message || err);
+    } finally {
+      setInternalLoading(false);
+    }
+  }, [onRefresh, contextData]);
+
+  // Fetch fresh properties from backend on mount and subscribe to updates
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('grabmykey_properties');
+    }
+
+    handleRefresh();
+
+    const handleSync = () => {
+      handleRefresh();
+    };
+
+    window.addEventListener('grabmykey_properties_updated', handleSync);
+    window.addEventListener('grabmykey_property_deleted', handleSync);
+    window.addEventListener('grabmykey_property_created', handleSync);
+
+    return () => {
+      window.removeEventListener('grabmykey_properties_updated', handleSync);
+      window.removeEventListener('grabmykey_property_deleted', handleSync);
+      window.removeEventListener('grabmykey_property_created', handleSync);
+    };
+  }, [handleRefresh]);
 
   const filteredProperties = useMemo(() => {
     if (!Array.isArray(properties)) return [];
@@ -62,17 +114,16 @@ export default function Properties({
             <Plus className="w-3.5 h-3.5 text-[#C59B27]" />
             <span>List Property</span>
           </Link>
-          {onRefresh && (
-            <button 
-              onClick={onRefresh}
-              disabled={isLoading}
-              className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-slate-900 border border-slate-200/80 hover:border-[#C59B27]/40 bg-white px-3.5 py-2 rounded-xl shadow-xs self-start md:self-auto transition-all duration-200 cursor-pointer font-sans"
-              title="Refresh database listings"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin text-[#C59B27]' : ''}`} />
-              <span>Refresh</span>
-            </button>
-          )}
+          <button 
+            type="button"
+            onClick={handleRefresh}
+            disabled={loading}
+            className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-slate-900 border border-slate-200/80 hover:border-[#C59B27]/40 bg-white px-3.5 py-2 rounded-xl shadow-xs self-start md:self-auto transition-all duration-200 cursor-pointer font-sans"
+            title="Refresh database listings"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin text-[#C59B27]' : ''}`} />
+            <span>Refresh</span>
+          </button>
         </div>
       </div>
 
@@ -168,9 +219,9 @@ export default function Properties({
                 className="cursor-pointer"
               >
                 <div className="relative h-56 overflow-hidden bg-slate-100 flex items-center justify-center">
-                  {(prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
+                  {(prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
                     <img 
-                      src={prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
+                      src={prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail} 
                       alt={prop.title || 'Property'}
                       className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                     />

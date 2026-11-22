@@ -3,10 +3,11 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import {
   Building2, Users, PlusCircle, Trash2, Edit3,
   CheckCircle2, Eye, RefreshCw, Phone, Search, DollarSign,
-  Sparkles, MapPin, X, Check, Save, ArrowLeft, Video, Upload,
+  MapPin, X, Check, Save, ArrowLeft, Video, Upload,
   FileText, ShieldCheck, Layers, Car,
   FileCheck, ArrowUpRight, Play, FolderCog, Tag, Filter,
-  ChevronUp, ChevronDown, Footprints, Train, Plane
+  ChevronUp, ChevronDown, Footprints, Train, Plane,
+  TrendingUp, Image as ImageIcon, Star
 } from 'lucide-react';
 
 import {
@@ -100,7 +101,8 @@ const INITIAL_FORM_STATE = {
   floorLevel: 'G+1',
   totalFloors: '2',
   youtubeVideoId: '',
-  galleryImagesStr: '',
+  coverImage: '',
+  galleryImages: [],
   description: '',
   badge: 'Verified Listing',
   isFeatured: false,
@@ -201,6 +203,13 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   });
   const [isSavingHeroSettings, setIsSavingHeroSettings] = useState(false);
   const [heroSaveSuccess, setHeroSaveSuccess] = useState(false);
+
+  // Custom Property Delete Confirmation Modal State
+  const [deleteModalState, setDeleteModalState] = useState({
+    isOpen: false,
+    property: null,
+    isDeleting: false
+  });
 
   // Dynamic feature selector based on category and presets (defaults to false / Not Included for new listings)
   const getFeaturesForCategory = (cat, defaultAvailable = false) => {
@@ -490,9 +499,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       floorLevel: prop.specs?.floorLevel || 'G',
       totalFloors: prop.specs?.totalFloors || '1',
       youtubeVideoId: prop.youtubeVideoId || (prop.videoUrl?.includes('v=') ? prop.videoUrl.split('v=')[1]?.substring(0, 11) : ''),
-      galleryImagesStr: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
-        ? prop.galleryImages.join('\n')
-        : (Array.isArray(prop.images) ? prop.images.join('\n') : ''),
+      coverImage: prop.coverImage || (Array.isArray(prop.galleryImages) && prop.galleryImages[0]) || (Array.isArray(prop.images) && prop.images[0]) || '',
+      galleryImages: Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0
+        ? prop.galleryImages
+        : (Array.isArray(prop.images) ? prop.images : []),
       badge: prop.badge || 'Verified Listing',
       description: prop.description || '',
       isFeatured: prop.isFeatured ?? false,
@@ -524,16 +534,87 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     navigate('/manage-345/publish-listing');
   };
 
-  // CRUD Property actions
-  const handleDeleteProperty = async (id) => {
-    if (!window.confirm('Delete this luxury listing from the active catalog? This action is irreversible.')) return;
-    try {
-      await deleteProperty(id);
-    } catch (err) {
-      console.warn('Backend delete error, removing locally:', err.message);
+  // CRUD Property actions & Custom Confirmation Modal
+  const handleRequestDelete = (property) => {
+    setDeleteModalState({
+      isOpen: true,
+      property,
+      isDeleting: false
+    });
+  };
+
+  const handleCloseDeleteModal = () => {
+    if (deleteModalState.isDeleting) return;
+    setDeleteModalState({
+      isOpen: false,
+      property: null,
+      isDeleting: false
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModalState.property) return;
+    const target = deleteModalState.property;
+    // Strictly prioritize true MongoDB ObjectId (_id)
+    const targetId = target._id || target.id;
+
+    if (!targetId) {
+      setDeleteModalState(prev => ({
+        ...prev,
+        error: 'Unable to identify property ID for deletion.'
+      }));
+      return;
     }
-    setProperties(prev => prev.filter(p => (p._id || p.id) !== id));
-    if (onDataUpdated) onDataUpdated();
+
+    setDeleteModalState(prev => ({ ...prev, isDeleting: true, error: null }));
+
+    try {
+      // Send DELETE request to Express backend
+      const response = await deleteProperty(targetId);
+
+      // Verify success response
+      if (response && response.success === false) {
+        throw new Error(response.message || 'Server indicated deletion failed');
+      }
+
+      // 1. Immediately remove from frontend state
+      setProperties(prev => prev.filter(p => {
+        const pId = p._id || p.id;
+        return pId !== targetId && String(p._id) !== String(targetId) && String(p.id) !== String(targetId);
+      }));
+
+      // 2. Broadcast live event across all open pages & storefront
+      window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
+      window.dispatchEvent(new CustomEvent('grabmykey_property_deleted', { detail: { id: targetId } }));
+
+      if (onDataUpdated) onDataUpdated();
+
+      // 3. Close modal cleanly
+      setDeleteModalState({
+        isOpen: false,
+        property: null,
+        isDeleting: false,
+        error: null
+      });
+    } catch (err) {
+      console.error('Property deletion failed:', err);
+      const isNetworkErr = !err.response && (
+        err.name === 'TypeError' ||
+        err.message?.includes('Network Error') ||
+        err.message?.includes('Failed to fetch') ||
+        err.message?.includes('ECONNREFUSED') ||
+        err.message?.includes('connection refused')
+      );
+      const errorMsg = isNetworkErr
+        ? 'Backend server is offline. Please start the Express server on port 5000 to delete listings from MongoDB.'
+        : (err.response?.data?.message || err.message || 'Failed to delete property from database.');
+
+      setDeleteModalState(prev => ({
+        ...prev,
+        isDeleting: false,
+        error: errorMsg
+      }));
+    }
   };
 
   // Lead actions
@@ -616,7 +697,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return `https://img.youtube.com/vi/${previewYoutubeId}/maxresdefault.jpg`;
     }
     const prop = properties.find(p => String(p._id) === String(heroSettings.heroFeaturedPropertyId) || String(p.id) === String(heroSettings.heroFeaturedPropertyId));
-    return prop?.images?.[0] || '';
+    return prop?.coverImage || prop?.images?.[0] || prop?.galleryImages?.[0] || '';
   }, [previewYoutubeId, heroSettings.heroFeaturedPropertyId, properties]);
 
   // Dynamic Car-Style Feature Matrix Handlers
@@ -825,6 +906,73 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setCustomItemModal(prev => ({ ...prev, isOpen: false }));
   };
 
+  // Client-Side Canvas Image Compression Helper (Max 1600px width, 0.85 quality)
+  const compressImageFile = (file, maxWidth = 1600, quality = 0.85) => {
+    return new Promise((resolve) => {
+      if (!file || !file.type.startsWith('image/')) {
+        resolve(null);
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let width = img.width;
+          let height = img.height;
+          if (width > maxWidth) {
+            height = Math.round((height * maxWidth) / width);
+            width = maxWidth;
+          }
+          const canvas = document.createElement('canvas');
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(img, 0, 0, width, height);
+          const dataUrl = canvas.toDataURL(file.type === 'image/png' ? 'image/png' : 'image/jpeg', quality);
+          resolve(dataUrl);
+        };
+        img.onerror = () => resolve(e.target.result);
+        img.src = e.target.result;
+      };
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Primary Cover Photo Upload Handlers
+  const handleCoverImageUpload = async (e) => {
+    if (e.target.files && e.target.files[0]) {
+      const compressed = await compressImageFile(e.target.files[0]);
+      if (compressed) {
+        setFormData(prev => ({ ...prev, coverImage: compressed }));
+      }
+    }
+  };
+
+  const handleRemoveCoverImage = () => {
+    setFormData(prev => ({ ...prev, coverImage: '' }));
+  };
+
+  // Property Gallery Photos Upload Handlers
+  const handleGalleryImagesUpload = async (e) => {
+    if (e.target.files && e.target.files.length > 0) {
+      const files = Array.from(e.target.files);
+      const results = await Promise.all(files.map(f => compressImageFile(f)));
+      const valid = results.filter(Boolean);
+      setFormData(prev => ({
+        ...prev,
+        galleryImages: [...(Array.isArray(prev.galleryImages) ? prev.galleryImages : []), ...valid]
+      }));
+    }
+  };
+
+  const handleRemoveGalleryImage = (idx) => {
+    setFormData(prev => ({
+      ...prev,
+      galleryImages: (Array.isArray(prev.galleryImages) ? prev.galleryImages : []).filter((_, i) => i !== idx)
+    }));
+  };
+
   // File Upload Handlers
   const handleFileUpload = (e) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -849,9 +997,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       return;
     }
     const isLand = formData.category === 'Land/Plot';
-    const parsedImages = formData.galleryImagesStr
-      ? formData.galleryImagesStr.split('\n').map(s => s.trim()).filter(Boolean)
-      : [];
+    const resolvedCover = formData.coverImage || (Array.isArray(formData.galleryImages) && formData.galleryImages[0]) || '';
+    const resolvedGallery = Array.isArray(formData.galleryImages) ? formData.galleryImages : [];
+    const orderedImages = resolvedCover
+      ? [resolvedCover, ...resolvedGallery.filter(img => img !== resolvedCover)]
+      : resolvedGallery;
 
     const priceNum = Number(formData.expectedPrice) || 25000000;
     const formatDisplayPrice = (val) => {
@@ -889,7 +1039,8 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         totalFloors: formData.totalFloors || '1'
       },
       youtubeVideoId: formData.youtubeVideoId?.trim() || '',
-      galleryImages: parsedImages,
+      coverImage: resolvedCover,
+      galleryImages: resolvedGallery,
       description: formData.description,
       componentsMatrix: formData.componentsMatrix || [],
       legalVerification: formData.legalVerification || [],
@@ -930,7 +1081,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       baths: isLand ? 0 : Number(formData.bathrooms),
       area: `${formData.carpetAreaSqFt} sq.ft`,
       videoUrl: `https://www.youtube.com/watch?v=${formData.youtubeVideoId}`,
-      images: parsedImages,
+      images: orderedImages,
       badge: formData.badge || 'Verified Listing',
       legalStatus: 'Clear Title / RERA Verified',
       highlights: [
@@ -1018,116 +1169,89 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     return counts;
   }, [properties]);
 
-  // Dynamic Title Clearance Ratio & Statutory Advocate Due Diligence Metrics
-  const complianceData = useMemo(() => {
+  // Dynamic Deal Type & Inventory Mix for Overview
+  const dealTypeBreakdown = useMemo(() => {
+    const counts = {
+      'Resale': 0,
+      'New Launch': 0,
+      'Rental / Lease': 0
+    };
+
+    properties.forEach(p => {
+      const dt = (p.dealType || 'Resale').trim();
+      if (dt.toLowerCase().includes('rental') || dt.toLowerCase().includes('lease')) {
+        counts['Rental / Lease'] += 1;
+      } else if (dt.toLowerCase().includes('new') || dt.toLowerCase().includes('launch')) {
+        counts['New Launch'] += 1;
+      } else {
+        counts['Resale'] += 1;
+      }
+    });
+
+    const total = properties.length;
+    return [
+      {
+        type: 'Resale Listings',
+        shortLabel: 'Resale',
+        count: counts['Resale'],
+        pct: total > 0 ? Math.round((counts['Resale'] / total) * 100) : 0,
+        barColor: 'bg-[#0a1d37]'
+      },
+      {
+        type: 'New Launch Developments',
+        shortLabel: 'New Launch',
+        count: counts['New Launch'],
+        pct: total > 0 ? Math.round((counts['New Launch'] / total) * 100) : 0,
+        barColor: 'bg-[#b8860b]'
+      },
+      {
+        type: 'Rental / Lease Units',
+        shortLabel: 'Rental / Lease',
+        count: counts['Rental / Lease'],
+        pct: total > 0 ? Math.round((counts['Rental / Lease'] / total) * 100) : 0,
+        barColor: 'bg-emerald-700'
+      }
+    ];
+  }, [properties]);
+
+  // Dynamic Average Ticket Size (Mean Portfolio Asking Price)
+  const averageTicketSize = useMemo(() => {
     if (!properties || properties.length === 0) {
       return {
-        hasProperties: false,
-        titleClearanceRatio: 0,
-        titleClearanceRatioFormatted: '0%',
-        metrics: [
-          { label: '30-Year Parent Deed Chain Audit', status: 'No active audits', pct: 0 },
-          { label: '30-Year Encumbrance Certificates (Nil EC)', status: 'No active audits', pct: 0 },
-          { label: 'Revenue RTC / Mutation Compliance', status: 'No active audits', pct: 0 },
-          { label: 'MCC / Local Body Plan Approvals', status: 'No active audits', pct: 0 },
-          { label: 'Physical Boundary DGPS Surveys', status: 'No active audits', pct: 0 }
-        ]
+        formatted: '₹0',
+        subtext: 'Mean portfolio asking price'
       };
     }
 
-    const checkDocVerified = (prop, regex, auditKey) => {
-      // 1. Direct check in advocateAudit object
-      if (prop.advocateAudit && auditKey && prop.advocateAudit[auditKey]) {
-        const val = String(prop.advocateAudit[auditKey]).toLowerCase();
-        if (val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || prop.advocateAudit[auditKey] === true) {
-          return true;
-        }
-        if (val === 'pending' || val === 'false') {
-          return false;
-        }
-      }
-
-      // 2. Check in legalVerification matrix
-      if (Array.isArray(prop.legalVerification) && prop.legalVerification.length > 0) {
-        const doc = prop.legalVerification.find(d => regex.test(d.documentName || d.title || d.verificationNote || ''));
-        if (doc) {
-          const s = (doc.verifiedStatus || doc.status || '').toLowerCase();
-          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || doc.isVerified === true;
+    const totalRaw = properties.reduce((acc, curr) => {
+      let price = curr.priceRaw || curr.expectedPrice || curr.pricing?.expectedPrice || 0;
+      if (!price && typeof curr.price === 'string') {
+        const pStr = curr.price.replace(/[^0-9.]/g, '');
+        const num = parseFloat(pStr);
+        if (!isNaN(num)) {
+          if (/cr/i.test(curr.price)) price = num * 10000000;
+          else if (/lakh/i.test(curr.price)) price = num * 100000;
+          else price = num;
         }
       }
-      return prop.advocateVerificationAvailable === true;
-    };
-
-    // Calculate individual audit metric clearance counts
-    const parentDeedCount = properties.filter(p => checkDocVerified(p, /parent|title\s*deed/i, 'parentDeedAudit')).length;
-    const encumbranceCount = properties.filter(p => checkDocVerified(p, /encumbrance|\bEC\b/i, 'encumbranceCertificate')).length;
-    const revenueRtcCount = properties.filter(p => checkDocVerified(p, /mutation|rtc|pahani|khata/i, 'revenueRtcCompliance')).length;
-    const mccPlanCount = properties.filter(p => checkDocVerified(p, /sanction|mcc|plan|occupancy|\bOC\b/i, 'mccPlanApprovals')).length;
-    const dgpsSurveyCount = properties.filter(p => checkDocVerified(p, /survey|fmb|dgps|boundary/i, 'dgpsSurveyVerification')).length;
-
-    const parentDeedPct = Math.round((parentDeedCount / properties.length) * 100);
-    const encumbrancePct = Math.round((encumbranceCount / properties.length) * 100);
-    const revenueRtcPct = Math.round((revenueRtcCount / properties.length) * 100);
-    const mccPlanPct = Math.round((mccPlanCount / properties.length) * 100);
-    const dgpsSurveyPct = Math.round((dgpsSurveyCount / properties.length) * 100);
-
-    // Calculate overall Title Clearance Ratio across active properties
-    const totalRatioSum = properties.reduce((sum, p) => {
-      if (p.advocateAudit && typeof p.advocateAudit === 'object' && Object.keys(p.advocateAudit).length > 0) {
-        const auditKeys = ['parentDeedAudit', 'encumbranceCertificate', 'revenueRtcCompliance', 'mccPlanApprovals', 'dgpsSurveyVerification'];
-        const passedCount = auditKeys.filter(k => {
-          const val = String(p.advocateAudit[k] || '').toLowerCase();
-          return val === 'cleared' || val === 'verified' || val === 'compliant' || val === 'nil ec verified' || p.advocateAudit[k] === true;
-        }).length;
-        return sum + (passedCount / auditKeys.length);
-      }
-      if (Array.isArray(p.legalVerification) && p.legalVerification.length > 0) {
-        const verifiedCount = p.legalVerification.filter(d => {
-          const s = (d.verifiedStatus || d.status || '').toLowerCase();
-          return s === 'verified' || s === 'cleared' || s === 'compliant' || s === 'nil ec verified' || d.isVerified === true;
-        }).length;
-        return sum + (verifiedCount / p.legalVerification.length);
-      }
-      return sum + (p.advocateVerificationAvailable ? 1 : 0);
+      return acc + (Number(price) || 0);
     }, 0);
 
-    const rawAvg = (totalRatioSum / properties.length) * 100;
-    const titleClearanceRatio = Math.round(rawAvg * 10) / 10;
-    const titleClearanceRatioFormatted = titleClearanceRatio % 1 === 0
-      ? `${titleClearanceRatio}%`
-      : `${titleClearanceRatio.toFixed(1)}%`;
+    const avg = totalRaw / properties.length;
+    let formatted = '₹0';
+    if (avg >= 10000000) {
+      const crVal = (avg / 10000000).toFixed(2).replace(/\.00$/, '');
+      formatted = `₹${crVal} Cr`;
+    } else if (avg >= 100000) {
+      const lkVal = (avg / 100000).toFixed(1).replace(/\.0$/, '');
+      formatted = `₹${lkVal} Lakhs`;
+    } else if (avg > 0) {
+      formatted = `₹${Math.round(avg).toLocaleString('en-IN')}`;
+    }
 
     return {
-      hasProperties: true,
-      titleClearanceRatio,
-      titleClearanceRatioFormatted,
-      metrics: [
-        {
-          label: '30-Year Parent Deed Chain Audit',
-          status: parentDeedPct > 0 ? `✓ ${parentDeedPct}% Cleared` : '0% Cleared',
-          pct: parentDeedPct
-        },
-        {
-          label: '30-Year Encumbrance Certificates (Nil EC)',
-          status: encumbrancePct > 0 ? `✓ ${encumbrancePct}% Cleared` : '0% Cleared',
-          pct: encumbrancePct
-        },
-        {
-          label: 'Revenue RTC / Mutation Compliance',
-          status: revenueRtcPct > 0 ? `✓ ${revenueRtcPct}% Verified` : '0% Verified',
-          pct: revenueRtcPct
-        },
-        {
-          label: 'MCC / Local Body Plan Approvals',
-          status: mccPlanPct > 0 ? `✓ ${mccPlanPct}% Compliant` : '0% Compliant',
-          pct: mccPlanPct
-        },
-        {
-          label: 'Physical Boundary DGPS Surveys',
-          status: dgpsSurveyPct > 0 ? `✓ ${dgpsSurveyPct}% Cleared` : '0% Cleared',
-          pct: dgpsSurveyPct
-        }
-      ]
+      formatted,
+      subtext: 'Mean portfolio asking price'
     };
   }, [properties]);
 
@@ -1164,7 +1288,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           <div className="w-full max-w-7xl mx-auto px-8 py-6 space-y-8">
 
             {/* ================================================================= */}
-            {/* VIEW 1: 📊 EXECUTIVE OVERVIEW                                     */}
+            {/* VIEW 1: EXECUTIVE OVERVIEW                                        */}
             {/* ================================================================= */}
             {activeTab === 'overview' && (
               <div className="space-y-8 w-full">
@@ -1172,12 +1296,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                 {/* Header Title */}
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
                   <div>
-                    <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight flex items-center space-x-2.5">
-                      <span>Executive Operations Overview</span>
-                      <Sparkles className="w-5 h-5 text-[#b8860b]" />
+                    <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight">
+                      Executive Operations Overview
                     </h1>
                     <p className="text-xs text-slate-500 mt-1">
-                      Real-time portfolio metrics, valuation aggregate, and advocate statutory governance.
+                      Real-time portfolio metrics, valuation aggregate, micro-market distribution, and media coverage.
                     </p>
                   </div>
                   <button
@@ -1238,38 +1361,32 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                     </div>
                   </div>
 
-                  {/* 4. Title Clearance Ratio */}
+                  {/* 4. Average Ticket Size */}
                   <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 flex flex-col justify-between">
                     <div className="flex items-center justify-between mb-3">
-                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Title Clearance Ratio</span>
+                      <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider">Average Ticket Size</span>
                       <div className={`w-9 h-9 rounded-xl flex items-center justify-center shadow-xs ${
-                        complianceData.hasProperties
-                          ? 'bg-emerald-50 border border-emerald-200 text-emerald-700'
+                        properties.length > 0
+                          ? 'bg-[#0a1d37] text-[#e6ca65]'
                           : 'bg-slate-100 border border-slate-200 text-slate-500'
                       }`}>
-                        <ShieldCheck className="w-4 h-4" />
+                        <TrendingUp className="w-4 h-4" />
                       </div>
                     </div>
                     <div>
                       <span className={`text-2xl font-serif font-bold ${
-                        complianceData.hasProperties ? 'text-emerald-800' : 'text-slate-400'
+                        properties.length > 0 ? 'text-[#0a1d37]' : 'text-slate-400'
                       }`}>
-                        {complianceData.titleClearanceRatioFormatted}
+                        {averageTicketSize.formatted}
                       </span>
-                      {complianceData.hasProperties ? (
-                        <span className="text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-emerald-200">
-                          Advocate panel audited title
-                        </span>
-                      ) : (
-                        <span className="text-slate-500 bg-slate-100 px-2 py-0.5 rounded-full text-xs font-semibold inline-block mt-1 border border-slate-200">
-                          No active audits
-                        </span>
-                      )}
+                      <span className="block text-xs text-slate-500 mt-1">
+                        {averageTicketSize.subtext}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {/* Visual Charts: Asset Class Distribution & Advocate Due Diligence */}
+                {/* Visual Charts: Asset Class Distribution & Deal Type Mix */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
 
                   {/* Chart 1: Asset Class Distribution (White Card + Soft Slate Bars) */}
@@ -1311,46 +1428,81 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                     </div>
                   </div>
 
-                  {/* Chart 2: Advocate Due Diligence Health (White Card + Green Pill Badges) */}
+                  {/* Chart 2: Deal Type & Inventory Mix + Quick Operational Shortcuts */}
                   <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6 flex flex-col justify-between">
                     <div>
                       <div className="flex items-center justify-between pb-3 border-b border-slate-100 mb-5">
                         <div>
-                          <h3 className="font-serif font-bold text-base text-[#0a1d37]">Advocate Due Diligence Health</h3>
-                          <p className="text-[11px] text-slate-500">Statutory audit compliance across active listings</p>
+                          <h3 className="font-serif font-bold text-base text-[#0a1d37]">Deal Type & Inventory Mix</h3>
+                          <p className="text-[11px] text-slate-500">Transaction typology breakdown and operations console</p>
                         </div>
-                        {complianceData.hasProperties ? (
-                          <div className="flex items-center space-x-1 text-emerald-800 bg-emerald-50 border border-emerald-200 px-2.5 py-1 rounded-full text-xs font-semibold">
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
-                            <span>High Court Aligned</span>
-                          </div>
-                        ) : (
-                          <div className="flex items-center space-x-1 text-slate-500 bg-slate-100 border border-slate-200 px-2.5 py-1 rounded-full text-xs font-semibold">
-                            <ShieldCheck className="w-3.5 h-3.5 text-slate-400" />
-                            <span>No active audits</span>
-                          </div>
-                        )}
+                        <span className="text-xs font-mono text-[#0a1d37] bg-slate-100 px-3 py-1 rounded-full border border-slate-200 font-semibold">
+                          {properties.length} Active Listings
+                        </span>
                       </div>
 
-                      <div className="space-y-3">
-                        {complianceData.metrics.map(metric => (
-                          <div key={metric.label} className="p-3 bg-[#fbf9f5] rounded-xl border border-slate-200 flex items-center justify-between text-xs">
-                            <span className="text-[#0a1d37] font-semibold">{metric.label}</span>
-                            <span className={`font-bold px-3 py-1 rounded-full text-xs font-mono shadow-2xs ${
-                              metric.pct > 0 && complianceData.hasProperties
-                                ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
-                                : 'bg-slate-100 text-slate-500 border border-slate-200'
-                            }`}>
-                              {metric.status}
-                            </span>
+                      {/* Transaction Typology Progress Bars */}
+                      <div className="space-y-3.5 mb-6">
+                        {dealTypeBreakdown.map((item) => (
+                          <div key={item.type} className="space-y-1.5">
+                            <div className="flex items-center justify-between text-xs">
+                              <span className="font-semibold text-[#0a1d37] flex items-center space-x-2">
+                                <span className={`w-2 h-2 rounded-full ${item.barColor}`} />
+                                <span>{item.type}</span>
+                              </span>
+                              <span className="font-mono text-slate-500">{item.count} Units ({item.pct}%)</span>
+                            </div>
+                            <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
+                              <div
+                                className={`h-full ${item.barColor} rounded-full transition-all duration-500`}
+                                style={{ width: `${item.pct}%` }}
+                              />
+                            </div>
                           </div>
                         ))}
+                      </div>
+
+                      {/* Quick Operational Shortcuts */}
+                      <div className="pt-4 border-t border-slate-100">
+                        <span className="text-[10px] uppercase font-bold tracking-wider text-slate-400 block mb-2.5">
+                          Quick Actions & Operations
+                        </span>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                          <button
+                            type="button"
+                            onClick={handleOpenCreateModal}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-[#0a1d37] hover:bg-[#061426] text-white text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                          >
+                            <PlusCircle className="w-3.5 h-3.5 text-[#e6ca65]" />
+                            <span>+ Publish New Listing</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTabSwitch('hero')}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-amber-50 hover:bg-amber-100 text-[#8b6508] border border-amber-200 text-xs font-semibold transition-all cursor-pointer"
+                          >
+                            <Video className="w-3.5 h-3.5 text-[#b8860b]" />
+                            <span>Manage Hero Video</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleTabSwitch('leads')}
+                            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 border border-slate-200 text-xs font-semibold transition-all cursor-pointer"
+                          >
+                            <Users className="w-3.5 h-3.5 text-slate-600" />
+                            <span>Review Owner Leads</span>
+                          </button>
+                        </div>
                       </div>
                     </div>
 
                     <div className="mt-5 pt-3 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
-                      <span>Karnataka Land Revenue Laws & MCC Bylaws</span>
-                      <button onClick={() => handleTabSwitch('inventory')} className="text-[#b8860b] hover:text-[#0a1d37] font-bold flex items-center space-x-1 cursor-pointer">
+                      <span>Mangaluru Active Catalog Mix</span>
+                      <button
+                        type="button"
+                        onClick={() => handleTabSwitch('inventory')}
+                        className="text-[#b8860b] hover:text-[#0a1d37] font-bold flex items-center space-x-1 cursor-pointer transition-colors"
+                      >
                         <span>Manage All Inventory</span>
                         <ArrowUpRight className="w-3.5 h-3.5" />
                       </button>
@@ -1395,7 +1547,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 2: 🏢 PROPERTY INVENTORY (LIGHT-LUXURY CRUD TABLE)           */}
+            {/* VIEW 2: PROPERTY INVENTORY (LIGHT-LUXURY CRUD TABLE)              */}
             {/* ================================================================= */}
             {activeTab === 'inventory' && (
               <div className="space-y-6 w-full">
@@ -1487,9 +1639,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                               <td className="py-4 px-6">
                                 <div className="flex items-center space-x-3">
                                   <div className="w-12 h-10 rounded-lg bg-slate-100 border border-slate-200 overflow-hidden shrink-0 shadow-2xs flex items-center justify-center">
-                                    {prop.images?.[0] ? (
+                                    {(prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail) ? (
                                       <img
-                                        src={prop.images[0]}
+                                        src={prop.coverImage || prop.images?.[0] || prop.galleryImages?.[0] || prop.thumbnail}
                                         alt={prop.title}
                                         className="w-full h-full object-cover"
                                       />
@@ -1561,7 +1713,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                   </button>
                                   <button
                                     type="button"
-                                    onClick={() => handleDeleteProperty(prop._id || prop.id)}
+                                    onClick={() => handleRequestDelete(prop)}
                                     className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 transition-colors cursor-pointer"
                                     title="Delete Property"
                                   >
@@ -1581,7 +1733,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 3: 📩 OWNER LEAD QUEUE (LIGHT-LUXURY TABLE)                  */}
+            {/* VIEW 3: OWNER LEAD QUEUE (LIGHT-LUXURY TABLE)                     */}
             {/* ================================================================= */}
             {activeTab === 'leads' && (
               <div className="space-y-6 w-full">
@@ -1720,7 +1872,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
             )}
 
             {/* ================================================================= */}
-            {/* VIEW 4: ➕ FULL-BLEED PROPERTY PUBLISHER (LIGHT LUXURY)           */}
+            {/* VIEW 4: FULL-BLEED PROPERTY PUBLISHER (LIGHT LUXURY)              */}
             {/* ================================================================= */}
             {activeTab === 'publish-listing' && (
               <div className="space-y-6 max-w-5xl mx-auto pb-12">
@@ -2092,18 +2244,179 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                           )}
                         </div>
 
-                        {/* Photo Image URLs string */}
-                        <div>
-                          <label className="block text-xs font-bold text-[#0a1d37] mb-1.5">
-                            Gallery Image URLs (One URL per line)
-                          </label>
-                          <textarea
-                            rows={4}
-                            value={formData.galleryImagesStr}
-                            onChange={e => setFormData({ ...formData, galleryImagesStr: e.target.value })}
-                            placeholder="https://example.com/property-photo.jpg (one URL per line)"
-                            className="w-full bg-slate-50 border border-slate-300 rounded-xl px-4 py-2.5 text-xs text-[#0a1d37] font-mono focus:border-[#b8860b] focus:outline-none"
-                          />
+                        {/* 1. DEDICATED PRIMARY COVER PHOTO UPLOAD ZONE */}
+                        <div className="space-y-3">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                                Primary Cover Photo <span className="text-red-500">*</span>
+                              </label>
+                              <span className="text-[11px] text-slate-500">
+                                The hero photograph featured on catalog cards, homepage highlights, and page headers (.jpg, .png, .webp).
+                              </span>
+                            </div>
+                            {formData.coverImage && (
+                              <span className="text-[11px] font-mono font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2.5 py-0.5 rounded-full flex items-center space-x-1">
+                                <Check className="w-3 h-3" />
+                                <span>Cover Active</span>
+                              </span>
+                            )}
+                          </div>
+
+                          {formData.coverImage ? (
+                            /* Instant Image Preview Card */
+                            <div className="relative border-2 border-emerald-500/40 bg-white rounded-2xl p-4 shadow-sm flex flex-col sm:flex-row items-center gap-4">
+                              <div className="relative w-full sm:w-56 h-36 rounded-xl overflow-hidden bg-slate-100 shrink-0 border border-slate-200">
+                                <img
+                                  src={formData.coverImage}
+                                  alt="Primary Cover Preview"
+                                  className="w-full h-full object-cover"
+                                />
+                                <span className="absolute top-2 left-2 bg-[#b8860b] text-white text-[9px] font-bold px-2 py-0.5 rounded shadow-sm font-mono flex items-center space-x-1">
+                                  <Star className="w-2.5 h-2.5 fill-current" />
+                                  <span>PRIMARY COVER</span>
+                                </span>
+                              </div>
+                              <div className="flex-1 w-full space-y-2">
+                                <div>
+                                  <span className="text-[10px] uppercase font-bold tracking-wider text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200">
+                                    Active Catalog Hero
+                                  </span>
+                                  <h4 className="text-sm font-bold text-[#0a1d37] mt-1.5 truncate">
+                                    Primary Listing Cover Photo
+                                  </h4>
+                                  <span className="text-xs text-slate-500 font-mono block mt-0.5">
+                                    Format: High-Resolution Web-Ready Image
+                                  </span>
+                                </div>
+                                <div className="flex items-center space-x-3 pt-2">
+                                  <label className="inline-flex items-center space-x-1.5 bg-[#f8f6f0] hover:bg-slate-100 text-[#0a1d37] px-3.5 py-2 rounded-xl text-xs font-semibold cursor-pointer border border-slate-300 transition-all">
+                                    <Upload className="w-3.5 h-3.5" />
+                                    <span>Replace Photo</span>
+                                    <input
+                                      type="file"
+                                      accept="image/jpeg,image/png,image/webp"
+                                      onChange={handleCoverImageUpload}
+                                      className="hidden"
+                                    />
+                                  </label>
+                                  <button
+                                    type="button"
+                                    onClick={handleRemoveCoverImage}
+                                    className="inline-flex items-center space-x-1.5 bg-red-50 hover:bg-red-100 text-red-600 px-3.5 py-2 rounded-xl text-xs font-semibold border border-red-200 transition-all cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                    <span>Remove Photo</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          ) : (
+                            /* Dedicated Single Dropzone */
+                            <div className="border-2 border-dashed border-amber-200/90 hover:border-[#b8860b] rounded-2xl p-6 text-center bg-[#f8f6f0] transition-all group">
+                              <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-amber-50 text-[#b8860b] border border-amber-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                                <ImageIcon className="w-6 h-6" />
+                              </div>
+                              <h5 className="text-xs font-bold text-[#0a1d37] mb-1">
+                                Upload Primary Cover Photo (.jpg, .png, .webp)
+                              </h5>
+                              <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                                Select a single hero photograph to represent this property across catalog cards and headers.
+                              </p>
+                              <label className="inline-flex items-center space-x-2 bg-[#b8860b] hover:bg-[#996515] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#b8860b]/40">
+                                <Upload className="w-3.5 h-3.5" />
+                                <span>Select Primary Cover Photo</span>
+                                <input
+                                  type="file"
+                                  accept="image/jpeg,image/png,image/webp"
+                                  onChange={handleCoverImageUpload}
+                                  className="hidden"
+                                />
+                              </label>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* 2. DEDICATED PROPERTY GALLERY PHOTOS MULTI-FILE UPLOAD ZONE */}
+                        <div className="space-y-3 pt-3 border-t border-slate-200/80">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <label className="block text-xs font-bold text-[#0a1d37] uppercase tracking-wider">
+                                Property Gallery Photos
+                              </label>
+                              <span className="text-[11px] text-slate-500">
+                                Upload additional interior, exterior, elevation, and amenity views (.jpg, .png, .webp).
+                              </span>
+                            </div>
+                            {Array.isArray(formData.galleryImages) && formData.galleryImages.length > 0 && (
+                              <span className="text-[11px] font-mono font-bold text-[#b8860b] bg-amber-50 border border-amber-200 px-2.5 py-0.5 rounded-full">
+                                {formData.galleryImages.length} Photo{formData.galleryImages.length !== 1 ? 's' : ''} Uploaded
+                              </span>
+                            )}
+                          </div>
+
+                          {/* Multi-file Gallery Dropzone */}
+                          <div className="border-2 border-dashed border-slate-300 hover:border-[#0a1d37] rounded-2xl p-6 text-center bg-[#f8f6f0] transition-all group">
+                            <div className="w-12 h-12 mx-auto mb-3 rounded-2xl bg-slate-100 text-[#0a1d37] border border-slate-200 flex items-center justify-center shadow-2xs group-hover:scale-105 transition-transform">
+                              <Upload className="w-6 h-6" />
+                            </div>
+                            <h5 className="text-xs font-bold text-[#0a1d37] mb-1">
+                              Upload Gallery Photos (.jpg, .png, .webp)
+                            </h5>
+                            <p className="text-[11px] text-slate-500 mb-4 max-w-sm mx-auto">
+                              Select multiple photos from your device to populate the property photo gallery carousel.
+                            </p>
+                            <label className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061426] text-white px-5 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider cursor-pointer shadow-sm transition-all border border-[#0a1d37]/40">
+                              <Upload className="w-3.5 h-3.5" />
+                              <span>Select Gallery Photos</span>
+                              <input
+                                type="file"
+                                multiple
+                                accept="image/jpeg,image/png,image/webp"
+                                onChange={handleGalleryImagesUpload}
+                                className="hidden"
+                              />
+                            </label>
+                          </div>
+
+                          {/* Clean Gallery Thumbnails Grid with Individual Remove Buttons */}
+                          {Array.isArray(formData.galleryImages) && formData.galleryImages.length > 0 && (
+                            <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 gap-3 pt-2">
+                              {formData.galleryImages.map((imgUrl, idx) => (
+                                <div
+                                  key={idx}
+                                  className="relative group rounded-xl overflow-hidden border border-slate-200 bg-white shadow-2xs hover:border-[#b8860b] transition-all"
+                                >
+                                  <div className="h-24 w-full overflow-hidden bg-slate-100 relative">
+                                    <img
+                                      src={imgUrl}
+                                      alt={`Gallery photo ${idx + 1}`}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() => handleRemoveGalleryImage(idx)}
+                                      className="absolute top-1.5 right-1.5 p-1 bg-black/75 hover:bg-red-600 text-white rounded-lg transition-colors cursor-pointer shadow-sm"
+                                      title="Remove photo"
+                                    >
+                                      <X className="w-3.5 h-3.5" />
+                                    </button>
+                                  </div>
+                                  <div className="p-1.5 flex items-center justify-between">
+                                    <span className="text-[10px] text-slate-600 font-medium">Photo #{idx + 1}</span>
+                                    <button
+                                      type="button"
+                                      onClick={() => setFormData(prev => ({ ...prev, coverImage: imgUrl }))}
+                                      className="text-[9px] text-[#b8860b] hover:underline font-semibold cursor-pointer"
+                                      title="Set this image as primary cover"
+                                    >
+                                      Set Cover
+                                    </button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         {/* Local File Upload Dropzone */}
@@ -2172,7 +2485,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                 </h3>
                               </div>
                               <p className="text-xs text-slate-500 mt-0.5">
-                                Grouped specifications with availability toggles (✓ / —) and optional custom descriptive notes.
+                                Grouped specifications with availability toggles and optional custom descriptive notes.
                               </p>
                             </div>
                             <div className="flex items-center space-x-2">
@@ -2278,7 +2591,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                               <button
                                                 type="button"
                                                 onClick={() => handleToggleFeature(item.originalIdx)}
-                                                title={isIncluded ? "Click to mark Not Included (—)" : "Click to mark Included (✓)"}
+                                                title={isIncluded ? "Click to mark Not Included" : "Click to mark Included"}
                                                 className={`px-2.5 py-1 rounded-full text-xs font-bold inline-flex items-center space-x-1 shrink-0 transition-transform active:scale-95 cursor-pointer shadow-2xs ${
                                                   isIncluded
                                                     ? 'bg-emerald-600 text-white hover:bg-emerald-700'
@@ -2599,10 +2912,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                             'bg-slate-50 border-slate-300 text-slate-700'
                                       }`}
                                   >
-                                    <option value="Verified">✓ Verified (Clean Clear Title)</option>
-                                    <option value="Pending">⏳ Pending Audit</option>
-                                    <option value="Issue Flagged">✕ Issue Flagged / Action Required</option>
-                                    <option value="Not Applicable">— Not Applicable</option>
+                                    <option value="Verified">Verified (Clean Clear Title)</option>
+                                    <option value="Pending">Pending Audit</option>
+                                    <option value="Issue Flagged">Issue Flagged / Action Required</option>
+                                    <option value="Not Applicable">Not Applicable</option>
                                   </select>
                                 </div>
 
@@ -3335,10 +3648,10 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                                     {preset.defaultStatus !== 'Not Available' ? (
                                       <span className="text-emerald-700 font-bold flex items-center space-x-1">
                                         <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                                        <span>✓ Included</span>
+                                        <span>Included</span>
                                       </span>
                                     ) : (
-                                      <span className="text-slate-400 font-medium">— Not Included</span>
+                                      <span className="text-slate-400 font-medium">Not Included</span>
                                     )}
                                   </td>
                                   <td className="py-3.5 px-4 text-slate-600 max-w-xs">
@@ -3486,8 +3799,8 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                       onChange={e => setPresetFormData({ ...presetFormData, defaultStatus: e.target.value })}
                       className="w-full bg-[#f8f6f0] border border-slate-200 rounded-xl px-3 py-2.5 text-xs text-slate-800 focus:outline-none focus:border-[#b8860b]"
                     >
-                      <option value="Available">✓ Available (Included)</option>
-                      <option value="Not Available">— Not Available</option>
+                      <option value="Available">Available (Included)</option>
+                      <option value="Not Available">Not Available</option>
                     </select>
                   </div>
                 </div>
@@ -3658,6 +3971,93 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           </>
         )}
       </AddCustomItemModal>
+
+      {/* CUSTOM PROPERTY DELETE CONFIRMATION MODAL */}
+      {deleteModalState.isOpen && deleteModalState.property && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-xs">
+          <div className="bg-[#FAF8F5] border border-stone-300 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-[#1A1A1A] animate-in fade-in zoom-in-95 duration-150">
+            {/* Top Close Button */}
+            <button
+              type="button"
+              onClick={handleCloseDeleteModal}
+              disabled={deleteModalState.isDeleting}
+              className="absolute top-4 right-4 text-stone-400 hover:text-[#1A1A1A] transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Modal Icon & Header */}
+            <div className="text-center mb-4">
+              <div className="w-12 h-12 rounded-xl bg-red-50 text-red-700 border border-red-200 flex items-center justify-center mx-auto mb-3 shadow-xs">
+                <Trash2 className="w-6 h-6" />
+              </div>
+              <h3 className="text-lg font-serif font-bold text-[#1A1A1A]">
+                Confirm Property Deletion
+              </h3>
+              <p className="text-xs text-stone-600 mt-1.5 leading-relaxed">
+                Are you sure you want to permanently remove <span className="font-bold text-[#1A1A1A]">"{deleteModalState.property.title}"</span> ({deleteModalState.property.listingCode || deleteModalState.property._id || 'Listing'}) from the active catalog? This action cannot be undone.
+              </p>
+            </div>
+
+            {/* Property Summary Strip */}
+            <div className="bg-white border border-stone-200 rounded-xl p-3 text-xs space-y-1 mb-5">
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Location:</span>
+                <span className="font-semibold text-[#1A1A1A] truncate max-w-[220px]">
+                  {deleteModalState.property.locality || deleteModalState.property.location || 'Mangaluru'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Price:</span>
+                <span className="font-serif font-bold text-[#b8860b]">
+                  {deleteModalState.property.price || 'Price on Request'}
+                </span>
+              </div>
+              <div className="flex justify-between">
+                <span className="text-stone-500 font-mono">Typology:</span>
+                <span className="font-medium text-stone-700">
+                  {deleteModalState.property.type || deleteModalState.property.category || 'Asset'} • {deleteModalState.property.dealType || 'Resale'}
+                </span>
+              </div>
+            </div>
+
+            {/* Error Message if Deletion Failed */}
+            {deleteModalState.error && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-xl p-3 font-medium mb-4 flex items-start space-x-2">
+                <span className="font-bold shrink-0">Deletion Blocked:</span>
+                <span>{deleteModalState.error}</span>
+              </div>
+            )}
+
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3">
+              <button
+                type="button"
+                onClick={handleCloseDeleteModal}
+                disabled={deleteModalState.isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-stone-300 bg-white hover:bg-stone-100 text-[#1A1A1A] text-xs font-semibold transition-colors cursor-pointer disabled:opacity-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmDelete}
+                disabled={deleteModalState.isDeleting}
+                className="flex-1 py-2.5 px-4 rounded-xl bg-red-700 hover:bg-red-800 text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center space-x-1.5 disabled:opacity-50"
+              >
+                {deleteModalState.isDeleting ? (
+                  <>
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                    <span>Deleting...</span>
+                  </>
+                ) : (
+                  <span>Confirm Deletion</span>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

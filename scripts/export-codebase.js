@@ -71,7 +71,7 @@ function scanAndBuildMarkdown(dirPath, markdownLines = []) {
 }
 
 function generateCodebaseMarkdown() {
-  console.log('📦 Bundling codebase into PROJECT_CODEBASE.md...');
+  console.log('[EXPORT] Bundling codebase into PROJECT_CODEBASE.md...');
   
   const header = [
     `# GrabMyKey Complete Codebase Export`,
@@ -81,7 +81,7 @@ function generateCodebaseMarkdown() {
 
   const lines = scanAndBuildMarkdown(ROOT_DIR, header);
   fs.writeFileSync(OUTPUT_FILE, lines.join('\n'), 'utf-8');
-  console.log(`✅ Codebase successfully exported to: ${OUTPUT_FILE}`);
+  console.log(`[SUCCESS] Codebase successfully exported to: ${OUTPUT_FILE}`);
 }
 
 generateCodebaseMarkdown();

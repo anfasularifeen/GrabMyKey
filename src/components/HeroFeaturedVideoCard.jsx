@@ -17,7 +17,7 @@ export function HeroFeaturedVideoCard({ property = null }) {
     let isMounted = true;
     const fetchFeatured = async () => {
       try {
-        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+        const apiUrl = API_ENDPOINTS.properties;
 
         const res = await fetch(apiUrl);
         if (res.ok) {
@@ -94,7 +94,7 @@ export function HeroFeaturedVideoCard({ property = null }) {
     location: activeProperty.location || (activeProperty.locality ? `${activeProperty.locality}, ${activeProperty.city || 'Mangaluru'}` : "Mangaluru"),
     priceText: activeProperty.priceText || (activeProperty.price ? String(activeProperty.price).replace(/^₹/, '').replace(/ •.*/, '') : ''),
     videoUrl: getEmbedVideoUrl(activeProperty.heroVideoUrl || activeProperty.videoUrl, activeProperty.youtubeVideoId),
-    thumbnail: activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
+    thumbnail: activeProperty.coverImage || activeProperty.thumbnail || activeProperty.images?.[0] || activeProperty.galleryImages?.[0] || '',
     slug: activeProperty.slug || activeProperty._id || activeProperty.id
   };
 

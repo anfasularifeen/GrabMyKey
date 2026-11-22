@@ -6,9 +6,10 @@ import ArchitecturalOverview from './ArchitecturalOverview';
 import Footer from './Footer';
 import { 
   Video, MapPin, Phone, CheckCircle2, 
-  ExternalLink, Layers, Sparkles, FileCheck, ArrowLeft, 
+  ExternalLink, FileCheck, ArrowLeft, 
   Calendar, Plane, Car, Train, Footprints,
-  GraduationCap, Bed, Bath, Building2
+  GraduationCap, Bed, Bath,
+  Check, Clock, Minus, ShieldCheck
 } from 'lucide-react';
 
 // Helper to format YouTube embed URLs without autoplay
@@ -196,6 +197,13 @@ export default function PropertyDetails({
   // Specs & Display Bindings with Safe Fallbacks
   const specs = propSpecsInput || getDefaultSpecs(property);
   const propDisplayId = property?.id || property?._id || "";
+  const propListingCode = property?.listingCode || (
+    property?.listingId && String(property.listingId).startsWith('GMK-')
+      ? property.listingId
+      : (propDisplayId
+          ? `GMK-MLR-${String(propDisplayId).replace(/[^a-zA-Z0-9]/g, '').slice(-4).toUpperCase()}`
+          : 'GMK-MLR-101')
+  );
   const propDisplaySlug = property?.slug || propDisplayId;
   const propDisplayLocation = property?.locality 
     ? `${property.locality}, ${property.city}` 
@@ -208,9 +216,14 @@ export default function PropertyDetails({
     : (property?.area || 'N/A');
   const propDisplayBeds = property?.specs?.bedrooms ?? property?.beds ?? 0;
   const propDisplayBaths = property?.specs?.bathrooms ?? property?.baths ?? 0;
-  const propDisplayImages = (property?.galleryImages && property.galleryImages.length > 0)
-    ? property.galleryImages
-    : ((property?.images && property.images.length > 0) ? property.images : []);
+  const rawCover = property?.coverImage || '';
+  const rawGallery = Array.isArray(property?.galleryImages) ? property.galleryImages : [];
+  const rawImgs = Array.isArray(property?.images) ? property.images : [];
+  const combinedImages = [];
+  if (rawCover) combinedImages.push(rawCover);
+  rawGallery.forEach(img => { if (img && !combinedImages.includes(img)) combinedImages.push(img); });
+  rawImgs.forEach(img => { if (img && !combinedImages.includes(img)) combinedImages.push(img); });
+  const propDisplayImages = combinedImages;
   const propDisplayVideoUrl = property?.youtubeVideoId 
     ? `https://www.youtube.com/watch?v=${property.youtubeVideoId}` 
     : property?.videoUrl;
@@ -261,7 +274,7 @@ export default function PropertyDetails({
                 <div className="text-[11px] font-bold text-amber-700 uppercase tracking-widest flex items-center gap-2">
                   <span>{property?.category || propDisplayType || 'Villa'}</span>
                   <span className="text-slate-300">•</span>
-                  <span className="text-slate-400 font-normal">Listing #{property?.listingId || propDisplayId || '1'}</span>
+                  <span className="text-slate-400 font-normal">Listing Ref: {propListingCode}</span>
                 </div>
 
                 {/* Property Title */}
@@ -344,23 +357,53 @@ export default function PropertyDetails({
 
                       {/* Right: Status Badge */}
                       <div className="shrink-0">
-                        {status === 'Verified' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            ✓ Verified
-                          </span>
-                        ) : status === 'Pending' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200/60">
-                            ⏳ Pending
-                          </span>
-                        ) : status === 'Issue Flagged' ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200/60">
-                            ✕ Flagged
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-slate-50 text-slate-600 border border-slate-200/60">
-                            — Pending
-                          </span>
-                        )}
+                        {(() => {
+                          const norm = (status || '').trim().toLowerCase();
+                          if (
+                            norm === 'verified' ||
+                            norm.includes('clean') ||
+                            norm.includes('clear') ||
+                            norm.includes('nil ec') ||
+                            norm.includes('compliant')
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Verified</span>
+                              </span>
+                            );
+                          }
+                          if (
+                            norm.includes('not applicable') ||
+                            norm === 'na' ||
+                            norm === 'n/a'
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-stone-100 text-stone-500 border border-stone-200">
+                                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Not Applicable</span>
+                              </span>
+                            );
+                          }
+                          if (
+                            norm.includes('flagged') ||
+                            norm.includes('issue') ||
+                            norm.includes('action')
+                          ) {
+                            return (
+                              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                                <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                                <span>Action Required</span>
+                              </span>
+                            );
+                          }
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-700 border border-amber-200">
+                              <Clock className="w-3.5 h-3.5 stroke-[2.5]" />
+                              <span>Pending</span>
+                            </span>
+                          );
+                        })()}
                       </div>
 
                     </div>
@@ -383,12 +426,14 @@ export default function PropertyDetails({
                       {/* Right: Status Badge */}
                       <div className="shrink-0">
                         {item?.isCleared ? (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 border border-emerald-200/60">
-                            ✓ Verified
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                            <Check className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Verified</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium bg-red-50 text-red-700 border border-red-200/60">
-                            ✕ Action Req.
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-50 text-red-700 border border-red-200">
+                            <Minus className="w-3.5 h-3.5 stroke-[2.5]" />
+                            <span>Action Required</span>
                           </span>
                         )}
                       </div>
@@ -411,7 +456,7 @@ export default function PropertyDetails({
                   </div>
                 </div>
                 <a 
-                  href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20verify%20title%20clearance%20with%20an%20Advocate%20(Bank%20Loan%20Bridge)%20for%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+                  href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20verify%20title%20clearance%20with%20an%20Advocate%20(Bank%20Loan%20Bridge)%20for%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
                   target="_blank"
                   rel="noreferrer"
                   className="inline-flex items-center space-x-2 bg-[#0a1d37] hover:bg-[#061224] text-white font-semibold px-4 py-2.5 rounded-xl text-xs tracking-wider transition-all shadow-sm shrink-0"
@@ -482,7 +527,7 @@ export default function PropertyDetails({
                 {propDisplayType || 'RESALE'}
               </span>
               <span className="text-xs font-mono text-slate-500 font-semibold">
-                #{propDisplayId}
+                {propListingCode}
               </span>
             </div>
 
@@ -600,7 +645,7 @@ export default function PropertyDetails({
 
             {/* Primary WhatsApp CTA Button */}
             <a 
-              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20am%20interested%20in%20inspecting%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20am%20interested%20in%20inspecting%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
               target="_blank"
               rel="noreferrer"
               className="w-full bg-gradient-to-r from-[#d4af37] to-[#b8860b] hover:from-[#c49f28] hover:to-[#997315] text-white font-bold py-3.5 px-4 rounded-xl text-xs uppercase tracking-wider text-center flex items-center justify-center space-x-2 shadow-md transition-all cursor-pointer mb-3"
@@ -611,7 +656,7 @@ export default function PropertyDetails({
 
             {/* Schedule Private Tour Button */}
             <a 
-              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20schedule%20a%20private%20tour%20for%20Property%20%23${propDisplayId}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
+              href={`https://wa.me/919876543210?text=Hello%20GrabMyKey,%20I%20would%20like%20to%20schedule%20a%20private%20tour%20for%20Property%20${propListingCode}%20(Slug:%20${propDisplaySlug}):%20${encodeURIComponent(property?.title || 'Property')}%20(${encodeURIComponent(propDisplayLocation)})`}
               target="_blank"
               rel="noreferrer"
               className="w-full bg-[#0a1d37] hover:bg-[#061224] text-white font-semibold py-2.5 px-4 rounded-xl text-xs tracking-wider text-center flex items-center justify-center space-x-2 transition-all cursor-pointer border border-[#b8860b]/30"

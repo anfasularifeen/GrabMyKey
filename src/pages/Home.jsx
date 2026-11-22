@@ -50,7 +50,7 @@ export default function Home({
     const fetchProperties = async () => {
       try {
         setIsLoading(true);
-        const apiUrl = API_ENDPOINTS.properties || 'http://localhost:5000/api/properties';
+        const apiUrl = API_ENDPOINTS.properties;
 
         const res = await fetch(apiUrl);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -117,7 +117,7 @@ export default function Home({
   const featured = featuredProperty;
 
   const activeVideoUrl = getEmbedVideoUrl(featured?.videoUrl || featured?.heroVideoUrl, featured?.youtubeVideoId);
-  const featuredPoster = featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
+  const featuredPoster = featured?.coverImage || featured?.images?.[0] || featured?.galleryImages?.[0] || featured?.thumbnail || '';
 
   const handleSearchSubmit = (e) => {
     e.preventDefault();

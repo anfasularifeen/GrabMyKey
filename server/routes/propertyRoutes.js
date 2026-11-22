@@ -3,6 +3,8 @@ import mongoose from 'mongoose';
 import Property from '../models/Property.js';
 import MasterPreset from '../models/MasterPreset.js';
 import { getActiveMasterPresets } from './presetRoutes.js';
+import { uploadImageToCloudinary, uploadImagesToCloudinary, deleteImagesFromCloudinary } from '../config/cloudinary.js';
+import { requireAdminAuth } from '../middleware/authMiddleware.js';
 
 const router = express.Router();
 
@@ -21,8 +23,8 @@ export const seedInitialProperties = async () => {
  * display the new item.
  * 
  * Default Fallbacks:
- * - Feature Specifications: isAvailable: false ("— Not Included") & descriptionNote: "Status Not Updated"
- * - Legal Verification: verifiedStatus: 'Pending' ("⏳ Pending") & verificationNote: "Pending Audit / Status Not Updated"
+ * - Feature Specifications: isAvailable: false ("Not Included") & descriptionNote: "Status Not Updated"
+ * - Legal Verification: verifiedStatus: 'Pending' ("Pending") & verificationNote: "Pending Audit / Status Not Updated"
  * - Preserves all previously recorded property-specific states, custom features, and custom legal items!
  */
 export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = []) => {
@@ -141,6 +143,11 @@ export const syncPropertyWithMasterPresets = (propertyInput, masterPresets = [])
   property.id = resolvedId;
   property._id = property._id || resolvedId;
   property.slug = property.slug || resolvedId;
+  if (!property.listingCode) {
+    const idStr = String(property._id || property.id || '').replace(/[^a-zA-Z0-9]/g, '');
+    const shortId = idStr.slice(-4).toUpperCase();
+    property.listingCode = `GMK-MLR-${shortId || '101'}`;
+  }
   property.city = property.city || 'Mangaluru';
   property.locality = property.locality || (property.location ? property.location.split(',')[0].trim() : 'Surathkal Beach');
   property.location = property.location || `${property.locality}, ${property.city}`;
@@ -463,9 +470,20 @@ export const createPropertyHandler = async (req, res) => {
 
     const isLand = (body.category === 'Land/Plot' || body.category === 'Plot' || body.type === 'Plot');
 
+    const listingCode = body.listingCode || `GMK-MLR-${Math.floor(100 + Math.random() * 900)}`;
+    const rawGalleryImages = Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
+      ? body.galleryImages 
+      : (Array.isArray(body.images) ? body.images : []);
+    const rawCoverImage = body.coverImage || (rawGalleryImages.length > 0 ? rawGalleryImages[0] : '');
+
+    // Upload to Cloudinary (stores permanent secure HTTPS URLs, or original strings if offline)
+    const coverImage = await uploadImageToCloudinary(rawCoverImage, 'grabmykey/properties');
+    const galleryImages = await uploadImagesToCloudinary(rawGalleryImages, 'grabmykey/properties');
+
     const propertyPayload = {
       title,
       slug,
+      listingCode,
       city: 'Mangaluru',
       locality: body.locality || (body.location ? body.location.split(',')[0].trim() : 'Central'),
       category: body.category || body.type || 'Villa',
@@ -484,9 +502,8 @@ export const createPropertyHandler = async (req, res) => {
         totalFloors: body.specs?.totalFloors || '1'
       },
       youtubeVideoId: body.youtubeVideoId?.trim() || (body.videoUrl?.includes('v=') ? body.videoUrl.split('v=')[1]?.substring(0, 11) : (body.videoUrl?.includes('youtu.be/') ? body.videoUrl.split('youtu.be/')[1]?.substring(0, 11) : '')) || '',
-      galleryImages: Array.isArray(body.galleryImages) && body.galleryImages.length > 0 
-        ? body.galleryImages 
-        : (Array.isArray(body.images) ? body.images : []),
+      coverImage,
+      galleryImages,
       description: body.description || '',
       componentsMatrix: Array.isArray(body.componentsMatrix) ? body.componentsMatrix : [],
       legalVerification,
@@ -519,7 +536,9 @@ export const createPropertyHandler = async (req, res) => {
       baths: isLand ? 0 : Number(body.baths ?? body.specs?.bathrooms ?? 0),
       area: body.area || (body.specs?.carpetAreaSqFt ? `${body.specs.carpetAreaSqFt} sq.ft` : body.carpetArea || ''),
       videoUrl: body.videoUrl || body.heroVideoUrl || (body.youtubeVideoId ? `https://www.youtube.com/watch?v=${body.youtubeVideoId}` : ''),
-      images: Array.isArray(body.images) ? body.images : (Array.isArray(body.galleryImages) ? body.galleryImages : []),
+      images: coverImage
+        ? [coverImage, ...galleryImages.filter(img => img !== coverImage)]
+        : galleryImages,
       badge: body.badge || 'Verified Listing',
       legalStatus: body.legalStatus || 'Clear Title / RERA Verified',
       highlights: Array.isArray(body.highlights) && body.highlights.length > 0 ? body.highlights : [
@@ -573,8 +592,8 @@ export const createPropertyHandler = async (req, res) => {
   }
 };
 
-router.post('/', createPropertyHandler);
-router.post('/properties', createPropertyHandler);
+router.post('/', requireAdminAuth, createPropertyHandler);
+router.post('/properties', requireAdminAuth, createPropertyHandler);
 
 // Controller: updateProperty
 export const updateProperty = async (req, res) => {
@@ -584,6 +603,24 @@ export const updateProperty = async (req, res) => {
     // Sanitize payload: prevent modifying immutable _id in MongoDB
     const updateData = { ...req.body };
     delete updateData._id;
+
+    // Upload any updated/new base64 images to Cloudinary
+    if (updateData.coverImage) {
+      updateData.coverImage = await uploadImageToCloudinary(updateData.coverImage, 'grabmykey/properties');
+    }
+    if (Array.isArray(updateData.galleryImages) && updateData.galleryImages.length > 0) {
+      updateData.galleryImages = await uploadImagesToCloudinary(updateData.galleryImages, 'grabmykey/properties');
+    }
+    // Synchronize updateData.images with uploaded coverImage and galleryImages to prevent raw base64 or desynchronization
+    if (updateData.coverImage || updateData.galleryImages) {
+      const activeCover = updateData.coverImage || '';
+      const activeGallery = Array.isArray(updateData.galleryImages) ? updateData.galleryImages : [];
+      updateData.images = activeCover
+        ? [activeCover, ...activeGallery.filter(img => img !== activeCover)]
+        : activeGallery;
+    } else if (Array.isArray(updateData.images) && updateData.images.length > 0) {
+      updateData.images = await uploadImagesToCloudinary(updateData.images, 'grabmykey/properties');
+    }
 
     if (Array.isArray(updateData.transitMatrix)) {
       updateData.transitMatrix = updateData.transitMatrix.map(t => ({
@@ -701,26 +738,70 @@ export const updateProperty = async (req, res) => {
 };
 
 // PUT /api/properties/:id - Update property listing (Admin only)
-router.put('/:id', updateProperty);
+router.put('/:id', requireAdminAuth, updateProperty);
 
 // PUT /api/properties/manage/:id - Alias update route
-router.put('/manage/:id', updateProperty);
+router.put('/manage/:id', requireAdminAuth, updateProperty);
 
 // DELETE /api/properties/:id - Remove listing (Admin only)
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdminAuth, async (req, res) => {
   try {
-    const deleted = await Property.findByIdAndDelete(req.params.id);
+    const identifier = req.params.id;
+    let deleted = null;
+
+    if (mongoose.connection.readyState === 1) {
+      if (mongoose.Types.ObjectId.isValid(identifier)) {
+        deleted = await Property.findByIdAndDelete(identifier);
+      }
+      if (!deleted) {
+        deleted = await Property.findOneAndDelete({
+          $or: [
+            { slug: identifier },
+            { id: identifier },
+            { listingCode: identifier }
+          ]
+        });
+      }
+    }
+
+    // Also remove from fallback in-memory cache if present
+    const initIdx = INITIAL_PROPERTIES.findIndex(p =>
+      String(p._id) === String(identifier) ||
+      String(p.id) === String(identifier) ||
+      p.slug === identifier ||
+      p.listingCode === identifier
+    );
+    if (initIdx !== -1) {
+      INITIAL_PROPERTIES.splice(initIdx, 1);
+      if (!deleted) {
+        deleted = { _id: identifier };
+      }
+    }
+
     if (!deleted) {
       return res.status(404).json({
         success: false,
-        message: 'Property not found to delete'
+        message: 'Property not found'
       });
     }
 
-    res.json({
+    // Clean up persistent Cloudinary images associated with this property
+    const imagesToDelete = [];
+    if (deleted.coverImage) imagesToDelete.push(deleted.coverImage);
+    if (Array.isArray(deleted.galleryImages)) imagesToDelete.push(...deleted.galleryImages);
+    if (Array.isArray(deleted.images)) imagesToDelete.push(...deleted.images);
+
+    if (imagesToDelete.length > 0) {
+      deleteImagesFromCloudinary(imagesToDelete).catch(err => {
+        console.warn('[Cloudinary Cleanup Warning]:', err.message);
+      });
+    }
+
+    res.status(200).json({
       success: true,
       message: 'Property deleted successfully',
-      data: { id: req.params.id }
+      id: identifier,
+      data: { id: identifier }
     });
   } catch (error) {
     console.error('Error deleting property:', error);

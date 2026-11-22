@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Layers, CheckCircle, ChevronDown, ChevronUp } from 'lucide-react';
+import { Layers, CheckCircle, X, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function PropertySpecifications({ specifications = [] }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -56,10 +56,17 @@ export default function PropertySpecifications({ specifications = [] }) {
                     {item.feature}
                   </td>
                   <td className="py-4 px-6 whitespace-nowrap">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
-                      <CheckCircle className="w-3.5 h-3.5 stroke-[2.5]"/>
-                      {item.status}
-                    </span>
+                    {(item.status === 'Included' || item.isAvailable === true) ? (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200 font-semibold text-[11px]">
+                        <CheckCircle className="w-3.5 h-3.5 stroke-[2.5] text-emerald-600"/>
+                        <span>Included</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-stone-100 text-stone-500 border border-stone-200 font-semibold text-[11px]">
+                        <X className="w-3.5 h-3.5 stroke-[2.5] text-stone-400"/>
+                        <span>Not Included</span>
+                      </span>
+                    )}
                   </td>
                   <td className="py-4 px-6 text-slate-600 leading-relaxed max-w-lg">
                     {item.details}

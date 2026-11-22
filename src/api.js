@@ -34,8 +34,22 @@ const apiClient = axios.create({
   headers: {
     'Content-Type': 'application/json'
   },
-  timeout: 5000
+  timeout: 10000
 });
+
+// Request interceptor: automatically attach JWT token if available
+apiClient.interceptors.request.use(
+  (config) => {
+    if (typeof window !== 'undefined') {
+      const token = localStorage.getItem('gmk_admin_jwt');
+      if (token) {
+        config.headers.Authorization = `Bearer ${token}`;
+      }
+    }
+    return config;
+  },
+  (error) => Promise.reject(error)
+);
 
 // Interceptor for response unwrapping and error logging
 apiClient.interceptors.response.use(
@@ -44,6 +58,14 @@ apiClient.interceptors.response.use(
     return response.data;
   },
   (error) => {
+    // If backend returns 401 Unauthorized, automatically purge stored credentials
+    if (error.response && error.response.status === 401) {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('gmk_admin_jwt');
+        localStorage.removeItem('gmk_admin_user');
+        window.dispatchEvent(new CustomEvent('grabmykey_admin_unauthorized'));
+      }
+    }
     const isOffline = error.code === 'ERR_NETWORK' || error.message?.includes('Network Error') || !error.response;
     if (isOffline) {
       setBackendOffline(true);
@@ -85,14 +107,18 @@ export const normalizeProperty = (p) => {
   }
   prop.priceText = prop.priceText || (prop.price ? String(prop.price).replace(/^₹/, '').replace(/ •.*/, '').trim() : '');
 
-  const imgs = (Array.isArray(prop.images) && prop.images.length > 0)
-    ? prop.images
-    : ((Array.isArray(prop.galleryImages) && prop.galleryImages.length > 0)
-        ? prop.galleryImages
-        : []);
-  prop.images = imgs;
-  prop.galleryImages = imgs;
-  prop.thumbnail = prop.thumbnail || imgs[0] || '';
+  const rawCover = prop.coverImage || '';
+  const rawGallery = Array.isArray(prop.galleryImages) ? prop.galleryImages : [];
+  const rawImgs = Array.isArray(prop.images) ? prop.images : [];
+  const combined = [];
+  if (rawCover) combined.push(rawCover);
+  rawGallery.forEach(img => { if (img && !combined.includes(img)) combined.push(img); });
+  rawImgs.forEach(img => { if (img && !combined.includes(img)) combined.push(img); });
+
+  prop.coverImage = rawCover || combined[0] || '';
+  prop.images = combined;
+  prop.galleryImages = combined;
+  prop.thumbnail = prop.coverImage || combined[0] || '';
 
   if (!prop.youtubeVideoId && prop.videoUrl) {
     const match = prop.videoUrl.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
@@ -223,7 +249,9 @@ export const createProperty = async (propertyData) => {
 
 // Delete a property listing by ID (Admin)
 export const deleteProperty = async (id) => {
-  return await apiClient.delete(`/properties/${id}`);
+  if (!id) throw new Error('Property ID is required for deletion');
+  const targetId = (typeof id === 'object' && id !== null) ? (id._id || id.id) : id;
+  return await apiClient.delete(`/properties/${targetId}`);
 };
 
 // Update an existing property listing (Admin)
@@ -386,6 +414,76 @@ export const checkServerHealth = async (forceProbe = false) => {
   }
 };
 
+/**
+ * Strict Admin Authentication API Methods
+ */
+export const getStoredAdminToken = () => {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('gmk_admin_jwt');
+};
+
+export const getStoredAdminUser = () => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem('gmk_admin_user');
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+};
+
+export const adminLogin = async (email, password) => {
+  const res = await apiClient.post('/auth/login', { email, password });
+  if (res?.token) {
+    localStorage.setItem('gmk_admin_jwt', res.token);
+    if (res.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+  }
+  return res;
+};
+
+export const adminSignup = async ({ name, email, password, inviteKey }) => {
+  const res = await apiClient.post('/auth/signup', { name, email, password, inviteKey });
+  if (res?.token) {
+    localStorage.setItem('gmk_admin_jwt', res.token);
+    if (res.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+  }
+  return res;
+};
+
+export const adminVerifyToken = async () => {
+  const token = getStoredAdminToken();
+  if (!token) {
+    return { success: false, message: 'No token found' };
+  }
+  try {
+    const res = await apiClient.get('/auth/me');
+    if (res?.admin) {
+      localStorage.setItem('gmk_admin_user', JSON.stringify(res.admin));
+    }
+    return res;
+  } catch (err) {
+    localStorage.removeItem('gmk_admin_jwt');
+    localStorage.removeItem('gmk_admin_user');
+    throw err;
+  }
+};
+
+export const adminLogout = async () => {
+  try {
+    await apiClient.post('/auth/logout');
+  } catch {
+    // Ignore error on network failure
+  } finally {
+    localStorage.removeItem('gmk_admin_jwt');
+    localStorage.removeItem('gmk_admin_user');
+  }
+  return { success: true };
+};
+
 export default {
   fetchProperties,
   fetchPropertyById,
@@ -403,7 +501,13 @@ export default {
   updatePreset,
   deletePreset,
   seedDefaultPresets,
-  checkServerHealth
+  checkServerHealth,
+  adminLogin,
+  adminSignup,
+  adminVerifyToken,
+  adminLogout,
+  getStoredAdminToken,
+  getStoredAdminUser
 };
 
 
