@@ -11,6 +11,7 @@ import { API_ENDPOINTS } from '../config/api';
 import { getAssetSpecPresets } from '../defaultPresets';
 import AddCustomItemModal from './AddCustomItemModal';
 import PublishSuccessModal from './PublishSuccessModal';
+import { toast } from 'sonner';
 
 export default function PublishListingPage({ onExit, onSaveProperty }) {
   const navigate = useNavigate();
@@ -20,7 +21,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     if (window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate('/manage-345');
+      navigate('/admin');
     }
   };
 
@@ -423,7 +424,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddCategory = () => {
     const catName = categoryModalData.categoryName.trim();
     if (!catName) {
-      alert('Please enter a category name.');
+      toast.error('Please enter a category name.');
       return;
     }
     if (!customCategories.includes(catName)) {
@@ -447,7 +448,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddFeature = () => {
     const featName = featureModalData.featureName.trim();
     if (!featName) {
-      alert('Please enter a feature name / title.');
+      toast.error('Please enter a feature name / title.');
       return;
     }
     setComponentsMatrix(prev => [
@@ -466,7 +467,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddLegalCheck = () => {
     const docName = legalModalData.documentName.trim();
     if (!docName) {
-      alert('Please enter statutory clearance or document title.');
+      toast.error('Please enter statutory clearance or document title.');
       return;
     }
     const newItem = {
@@ -499,7 +500,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     }
 
     if (!title || !title.trim()) {
-      alert('Please enter a property title.');
+      toast.error('Please enter a property title.');
       setFormStep(1);
       return;
     }
@@ -669,10 +670,10 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       if (isServerOffline) {
         const offlineMsg = "Backend server is offline. Please start Node server on port 5000.";
         setSubmitError(offlineMsg);
-        alert(offlineMsg);
+        toast.warning(offlineMsg);
       } else {
         setSubmitError(err.message || 'Failed to submit listing. Please try again.');
-        alert(`Submission error: ${err.message || 'Could not connect to backend server'}`);
+        toast.error(`Submission error: ${err.message || 'Could not connect to backend server'}`);
       }
     } finally {
       setIsSubmitting(false);
@@ -780,7 +781,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
 
                 <div className="hidden sm:flex items-center space-x-2">
                   <span className="text-xs font-mono text-slate-400">
-                    Route: <span className="text-[#b8860b] font-semibold">/manage-345/publish-listing</span>
+                    Route: <span className="text-[#b8860b] font-semibold">/admin/publish-listing</span>
                   </span>
                 </div>
               </div>
@@ -1919,7 +1920,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             <span className="text-slate-300">•</span>
             <span className="text-slate-500">Executive Management Suite</span>
           </div>
-          <span className="font-mono text-[11px] text-slate-400">Route: /manage-345/publish-listing</span>
+          <span className="font-mono text-[11px] text-slate-400">Route: /admin/publish-listing</span>
         </div>
       </footer>
 
@@ -2096,7 +2097,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         onBackToInventory={() => {
           setShowPublishSuccessModal(false);
           if (onExit) onExit();
-          else navigate('/manage-345');
+          else navigate('/admin');
         }}
       />
 

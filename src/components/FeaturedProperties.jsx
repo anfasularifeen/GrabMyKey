@@ -46,7 +46,7 @@ export default function FeaturedProperties({ properties: initialProperties = [],
         </p>
         <div className="pt-2">
           <Link
-            to="/manage-345"
+            to="/admin"
             className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F172A] hover:bg-[#C59B27] text-white rounded-xl text-xs font-semibold transition-colors font-sans shadow-sm"
           >
             <span>Open Admin Panel</span>

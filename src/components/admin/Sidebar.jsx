@@ -6,6 +6,7 @@ import {
   PlusCircle,
   Video,
   FolderCog,
+  ShieldCheck,
   LogOut
 } from 'lucide-react';
 
@@ -16,6 +17,7 @@ export default function Sidebar({
   propertiesCount = 0,
   newLeadsCount = 0,
   presetsCount = 0,
+  pendingAdminsCount = 0,
   onExit
 }) {
   const navItems = [
@@ -58,6 +60,13 @@ export default function Sidebar({
       icon: FolderCog,
       count: presetsCount,
       onClick: () => onTabSwitch('master-presets')
+    },
+    {
+      id: 'admin-security',
+      label: 'Admin Access & Security',
+      icon: ShieldCheck,
+      badgeText: pendingAdminsCount > 0 ? `${pendingAdminsCount} New` : null,
+      onClick: () => onTabSwitch('admin-security')
     }
   ];
 

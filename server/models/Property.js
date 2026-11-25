@@ -161,7 +161,7 @@ const formatInrPrice = (amount) => {
 
 // Auto-sync backward compatibility and new schema fields before saving
 PropertySchema.pre('save', function () {
-  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-345)
+  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-202)
   if (!this.listingCode) {
     if (this._id) {
       const idStr = String(this._id).replace(/[^a-zA-Z0-9]/g, '');

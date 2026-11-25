@@ -2,6 +2,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import propertyRoutes from './routes/propertyRoutes.js';
@@ -141,7 +142,47 @@ const startServer = async () => {
     console.log(`Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
   } catch (err) {
     console.warn(`[MongoDB Warning] ${err.message}`);
-    console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    // If local socket exists and TCP connection failed (e.g. sandbox environment), attempt unix domain socket fallback
+    if (fs.existsSync('/tmp/mongodb-27017.sock')) {
+      try {
+        console.log('Attempting connection via Unix domain socket /tmp/mongodb-27017.sock...');
+        await mongoose.connect('mongodb://%2Ftmp%2Fmongodb-27017.sock/grabmykey', {
+          serverSelectionTimeoutMS: 3000
+        });
+        console.log('Connected to MongoDB via local Unix socket (/tmp/mongodb-27017.sock)');
+      } catch (sockErr) {
+        console.warn(`[Unix Socket Warning] ${sockErr.message}`);
+      }
+    }
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    }
+  }
+
+  // Legacy Admin Status & Primary Superadmin Startup Migration
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const updateResult = await mongoose.connection.collection('admins').updateMany(
+        {
+          $or: [
+            { status: { $exists: false } },
+            { status: null },
+            { email: 'contact@grabmykey.in' }
+          ]
+        },
+        {
+          $set: {
+            status: 'approved',
+            role: 'superadmin'
+          }
+        }
+      );
+      if (updateResult.modifiedCount > 0) {
+        console.log(`[Admin Migration] Successfully migrated ${updateResult.modifiedCount} admin record(s) to approved superadmin.`);
+      }
+    } catch (migrationErr) {
+      console.warn(`[Admin Migration Warning]: ${migrationErr.message}`);
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {

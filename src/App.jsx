@@ -140,7 +140,12 @@ export default function App() {
   const currentPath = location.pathname;
   const isAdminLoginRoute = currentPath === '/admin/login';
   const isAdminSignupRoute = currentPath === '/admin/signup';
-  const isAdminConsoleRoute = (currentPath === '/admin' || currentPath.startsWith('/admin/') || currentPath.startsWith('/manage-345')) && !isAdminLoginRoute && !isAdminSignupRoute;
+  const isAdminConsoleRoute = (
+    currentPath === '/admin' ||
+    currentPath.startsWith('/admin/') ||
+    currentPath === '/manage-345' ||
+    currentPath.startsWith('/manage-345/')
+  ) && !isAdminLoginRoute && !isAdminSignupRoute;
   const isPropertyDetailRoute = currentPath.startsWith('/property/');
   const propertyIdFromUrl = isPropertyDetailRoute ? currentPath.replace(/^\/property\//, '').split('/')[0] : null;
 
@@ -289,7 +294,7 @@ export default function App() {
       if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
         if (getStoredAdminToken()) {
-          navigate('/manage-345');
+          navigate('/admin');
         } else {
           navigate('/admin/login');
         }
@@ -485,7 +490,7 @@ export default function App() {
       <AdminLogin
         onLoginSuccess={() => {
           setIsAdminLoggedIn(true);
-          navigate('/manage-345');
+          navigate('/admin');
         }}
       />
     );
@@ -499,14 +504,14 @@ export default function App() {
       <AdminSignup
         onSignupSuccess={() => {
           setIsAdminLoggedIn(true);
-          navigate('/manage-345');
+          navigate('/admin');
         }}
       />
     );
   }
 
   // =========================================================================
-  // VIEW: EXECUTIVE ADMIN SUITE (/manage-345 & /admin/*)
+  // VIEW: EXECUTIVE ADMIN SUITE (/admin/*)
   // Strictly protected by verified JWT session token
   // =========================================================================
   if (isAdminConsoleRoute) {

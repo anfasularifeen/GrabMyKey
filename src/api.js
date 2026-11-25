@@ -242,7 +242,7 @@ export const fetchPropertyById = async (id) => {
   return { success: false, data: null };
 };
 
-// Create a new property listing (Admin PIN verified)
+// Create a new property listing (Admin auth verified)
 export const createProperty = async (propertyData) => {
   return await apiClient.post('/properties', propertyData);
 };
@@ -484,6 +484,33 @@ export const adminLogout = async () => {
   return { success: true };
 };
 
+/**
+ * Admin Access & Security Management
+ */
+export const fetchAdmins = async () => {
+  return await apiClient.get('/auth/admins');
+};
+
+export const approveAdmin = async (id) => {
+  return await apiClient.patch(`/auth/admins/${id}/approve`);
+};
+
+export const rejectAdmin = async (id) => {
+  return await apiClient.patch(`/auth/admins/${id}/reject`);
+};
+
+export const deleteAdmin = async (id) => {
+  return await apiClient.delete(`/auth/admins/${id}`);
+};
+
+export const fetchInviteKey = async () => {
+  return await apiClient.get('/auth/invite-key');
+};
+
+export const updateInviteKey = async (inviteKey) => {
+  return await apiClient.put('/auth/invite-key', { inviteKey });
+};
+
 export default {
   fetchProperties,
   fetchPropertyById,
@@ -506,6 +533,12 @@ export default {
   adminSignup,
   adminVerifyToken,
   adminLogout,
+  fetchAdmins,
+  approveAdmin,
+  rejectAdmin,
+  deleteAdmin,
+  fetchInviteKey,
+  updateInviteKey,
   getStoredAdminToken,
   getStoredAdminUser
 };

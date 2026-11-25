@@ -7,7 +7,8 @@ const TAB_LABELS = {
   leads: 'Owner Lead Queue',
   'publish-listing': 'Publish / Edit Listing',
   'hero-settings': 'Hero Video Settings',
-  'master-presets': 'System Presets & Config'
+  'master-presets': 'System Presets & Config',
+  'admin-security': 'Admin Access & Security'
 };
 
 export default function Navbar({ activeTab, onNewListing, onExit }) {

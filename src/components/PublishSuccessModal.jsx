@@ -46,7 +46,7 @@ export default function PublishSuccessModal({
     if (onBackToInventory) {
       onBackToInventory();
     } else {
-      navigate('/manage-345');
+      navigate('/admin');
     }
     if (onClose) onClose();
   };

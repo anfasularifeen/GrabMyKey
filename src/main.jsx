@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import { PropertyProvider } from './context/PropertyContext'
+import { Toaster } from 'sonner'
 
 // Ensure browser storage is cleared of any legacy mock properties
 try {
@@ -16,6 +17,7 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <PropertyProvider>
         <App />
+        <Toaster position="top-right" richColors closeButton />
       </PropertyProvider>
     </BrowserRouter>
   </StrictMode>,

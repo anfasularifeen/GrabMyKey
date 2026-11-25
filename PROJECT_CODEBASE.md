@@ -1,5 +1,5 @@
 # GrabMyKey Complete Codebase Export
-> Generated on: 11/14/2026, 12:07:11 PM
+> Generated on: 11/25/2026, 9:14:09 AM
 
 ---
 
@@ -194,11 +194,13 @@ import ReactDOM from 'react-dom/client';
 import { BrowserRouter } from 'react-router-dom';
 import AdminApp from './App.jsx';
 import '../../src/index.css';
+import { Toaster } from 'sonner';
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
       <AdminApp />
+      <Toaster position="top-right" richColors closeButton />
     </BrowserRouter>
   </React.StrictMode>
 );
@@ -291,6 +293,7 @@ export default defineConfig({
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
     "react-router-dom": "^7.18.4",
+    "sonner": "^2.0.8",
     "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
@@ -748,7 +751,7 @@ export const uploadImagesToCloudinary = async (imagesArray, folder = 'grabmykey/
 
 /**
  * Extract Cloudinary public_id from a secure URL
- * Example: https://res.cloudinary.com/cloudname/image/upload/v12345/grabmykey/properties/sample.jpg
+ * Example: https://res.cloudinary.com/cloudname/image/upload/v1690000000/grabmykey/properties/sample.jpg
  * Returns: grabmykey/properties/sample
  */
 export const extractPublicId = (url) => {
@@ -877,6 +880,11 @@ const AdminSchema = new mongoose.Schema({
     type: String,
     enum: ['admin', 'superadmin'],
     default: 'admin'
+  },
+  status: {
+    type: String,
+    enum: ['pending', 'approved', 'rejected'],
+    default: 'pending'
   },
   lastLogin: {
     type: Date,
@@ -1179,7 +1187,7 @@ const formatInrPrice = (amount) => {
 
 // Auto-sync backward compatibility and new schema fields before saving
 PropertySchema.pre('save', function () {
-  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-345)
+  // Generate human-readable listingCode if absent (e.g. GMK-MLR-101 or GMK-MLR-202)
   if (!this.listingCode) {
     if (this._id) {
       const idStr = String(this._id).replace(/[^a-zA-Z0-9]/g, '');
@@ -1318,6 +1326,37 @@ export default Property;
 
 ```
 
+## File: `server/models/Setting.js`
+
+```javascript
+import mongoose from 'mongoose';
+
+const SettingSchema = new mongoose.Schema({
+  key: {
+    type: String,
+    required: true,
+    unique: true,
+    trim: true
+  },
+  value: {
+    type: mongoose.Schema.Types.Mixed,
+    required: true
+  },
+  description: {
+    type: String,
+    default: ''
+  }
+}, {
+  timestamps: true
+});
+
+const Setting = mongoose.models.Setting || mongoose.model('Setting', SettingSchema);
+
+export default Setting;
+
+
+```
+
 ## File: `server/models/SiteSettings.js`
 
 ```javascript
@@ -1380,8 +1419,10 @@ export default mongoose.models.SiteSettings || mongoose.model('SiteSettings', Si
 
 ```javascript
 import express from 'express';
+import mongoose from 'mongoose';
 import jwt from 'jsonwebtoken';
 import Admin from '../models/Admin.js';
+import Setting from '../models/Setting.js';
 import { requireAdminAuth } from '../middleware/authMiddleware.js';
 import dotenv from 'dotenv';
 
@@ -1389,7 +1430,19 @@ dotenv.config();
 
 const router = express.Router();
 const JWT_SECRET = process.env.JWT_SECRET || 'grabmykey_luxury_real_estate_jwt_secret_key_2026';
-const ADMIN_INVITE_KEY = process.env.ADMIN_INVITE_KEY || 'GMK-ADMIN-2026';
+
+// Helper to fetch active dynamic invite key from database or fallback to env
+const getActiveInviteKey = async () => {
+  try {
+    const setting = await Setting.findOne({ key: 'admin_invite_key' });
+    if (setting && setting.value && String(setting.value).trim()) {
+      return String(setting.value).trim();
+    }
+  } catch (err) {
+    console.error('[Error fetching dynamic invite key]:', err);
+  }
+  return (process.env.ADMIN_INVITE_KEY || 'GMK-ADMIN-2026').trim();
+};
 
 // Helper to generate a signed JWT token (7-day validity)
 const generateToken = (admin) => {
@@ -1398,7 +1451,8 @@ const generateToken = (admin) => {
       id: admin._id || admin.id,
       name: admin.name,
       email: admin.email,
-      role: admin.role || 'admin'
+      role: admin.role || 'admin',
+      status: admin.status || 'approved'
     },
     JWT_SECRET,
     { expiresIn: '7d' }
@@ -1407,9 +1461,18 @@ const generateToken = (admin) => {
 
 /**
  * POST /api/auth/signup
- * Register a new administrative user with an authorized invite key
+ * Register a new administrative user.
+ * - If 0 approved admins exist: auto-approves as superadmin and issues token.
+ * - If approved admins already exist: requires valid dynamic invite key and creates account with 'pending' status.
  */
 router.post('/signup', async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
   try {
     const { name, email, password, inviteKey } = req.body;
 
@@ -1425,15 +1488,16 @@ router.post('/signup', async (req, res) => {
 
     const normalizedEmail = email.trim().toLowerCase();
 
-    // Check if any admin already exists in the system
-    const adminCount = await Admin.countDocuments();
+    // Check if an approved admin already exists in the system
+    const approvedCount = await Admin.countDocuments({ status: 'approved' });
 
-    // If admins already exist, strictly verify the administrative invite key
-    if (adminCount > 0) {
-      if (!inviteKey || inviteKey.trim() !== ADMIN_INVITE_KEY) {
+    // If approved admins exist, strictly verify the administrative invite key
+    if (approvedCount > 0) {
+      const activeInviteKey = await getActiveInviteKey();
+      if (!inviteKey || inviteKey.trim() !== activeInviteKey) {
         return res.status(403).json({
           success: false,
-          message: 'Invalid administrative invite key. Contact your system superadmin for authorization.'
+          message: 'Invalid administrative invite key. Contact an authorized administrator.'
         });
       }
     }
@@ -1447,26 +1511,45 @@ router.post('/signup', async (req, res) => {
       });
     }
 
-    // Create the new administrator (the first one is superadmin)
+    const isFirstAdmin = approvedCount === 0;
+
+    // Create the administrator
     const newAdmin = await Admin.create({
       name: name.trim(),
       email: normalizedEmail,
       password,
-      role: adminCount === 0 ? 'superadmin' : 'admin',
-      lastLogin: new Date()
+      role: isFirstAdmin ? 'superadmin' : 'admin',
+      status: isFirstAdmin ? 'approved' : 'pending',
+      lastLogin: isFirstAdmin ? new Date() : null
     });
 
-    const token = generateToken(newAdmin);
+    if (isFirstAdmin) {
+      const token = generateToken(newAdmin);
+      return res.status(201).json({
+        success: true,
+        message: 'Initial administrator account created and activated successfully.',
+        token,
+        admin: {
+          id: newAdmin._id,
+          name: newAdmin.name,
+          email: newAdmin.email,
+          role: newAdmin.role,
+          status: newAdmin.status
+        }
+      });
+    }
 
+    // Account created in pending status - no session token issued
     res.status(201).json({
       success: true,
-      message: 'Administrator account registered successfully.',
-      token,
+      pendingApproval: true,
+      message: 'Your registration request has been submitted and is pending approval from an existing administrator.',
       admin: {
         id: newAdmin._id,
         name: newAdmin.name,
         email: newAdmin.email,
-        role: newAdmin.role
+        role: newAdmin.role,
+        status: newAdmin.status
       }
     });
   } catch (error) {
@@ -1481,9 +1564,17 @@ router.post('/signup', async (req, res) => {
 
 /**
  * POST /api/auth/login
- * Authenticate administrator with email and password
+ * Authenticate administrator with email and password.
+ * Strictly blocks 'pending' or 'rejected' accounts.
  */
 router.post('/login', async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
   try {
     const { email, password } = req.body;
 
@@ -1512,6 +1603,38 @@ router.post('/login', async (req, res) => {
       });
     }
 
+    // Auto-migrate legacy admin records created before the status field existed
+    // or ensure primary admin (contact@grabmykey.in) is always superadmin & approved
+    const rawAdmin = await Admin.collection.findOne({ _id: admin._id });
+    const isPrimaryAdmin = normalizedEmail === 'contact@grabmykey.in';
+    const isLegacyRecord = !rawAdmin || !('status' in rawAdmin) || rawAdmin.status === null;
+
+    if (isPrimaryAdmin || isLegacyRecord) {
+      admin.status = 'approved';
+      if (isPrimaryAdmin || !rawAdmin?.role || rawAdmin.role === 'admin') {
+        admin.role = 'superadmin';
+      }
+      await admin.save();
+    }
+
+    // Check admin approval status
+    const status = admin.status || 'approved';
+
+    if (status === 'pending') {
+      return res.status(403).json({
+        success: false,
+        pendingApproval: true,
+        message: 'Your admin account is awaiting approval from an existing administrator.'
+      });
+    }
+
+    if (status === 'rejected') {
+      return res.status(403).json({
+        success: false,
+        message: 'Your administrative access request has been declined. Please contact your system administrator.'
+      });
+    }
+
     // Update last login timestamp
     admin.lastLogin = new Date();
     await admin.save();
@@ -1526,7 +1649,8 @@ router.post('/login', async (req, res) => {
         id: admin._id,
         name: admin.name,
         email: admin.email,
-        role: admin.role
+        role: admin.role,
+        status: admin.status || 'approved'
       }
     });
   } catch (error) {
@@ -1544,12 +1668,27 @@ router.post('/login', async (req, res) => {
  * Verify current JWT token and return active admin profile
  */
 router.get('/me', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
   try {
     const admin = await Admin.findById(req.admin.id).select('-password');
     if (!admin) {
       return res.status(404).json({
         success: false,
         message: 'Administrator profile not found.'
+      });
+    }
+
+    const status = admin.status || 'approved';
+    if (status !== 'approved') {
+      return res.status(403).json({
+        success: false,
+        message: 'Account is not in approved state.'
       });
     }
 
@@ -1560,6 +1699,7 @@ router.get('/me', requireAdminAuth, async (req, res) => {
         name: admin.name,
         email: admin.email,
         role: admin.role,
+        status: admin.status,
         lastLogin: admin.lastLogin
       }
     });
@@ -1568,6 +1708,276 @@ router.get('/me', requireAdminAuth, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to retrieve administrative profile.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/auth/admins
+ * List all registered administrators (Protected)
+ */
+router.get('/admins', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const admins = await Admin.find().select('-password').sort({ createdAt: -1 });
+    res.status(200).json({
+      success: true,
+      admins
+    });
+  } catch (error) {
+    console.error('[Auth List Admins Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to list administrators.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/auth/admins/:id/approve
+ * Approve a pending admin account (Protected)
+ */
+router.patch('/admins/:id/approve', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const admin = await Admin.findById(req.params.id);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator not found.'
+      });
+    }
+
+    admin.status = 'approved';
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Account for ${admin.name} has been approved.`,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        status: admin.status
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Approve Admin Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to approve administrator.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PATCH /api/auth/admins/:id/reject
+ * Reject an admin account (Protected)
+ */
+router.patch('/admins/:id/reject', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const admin = await Admin.findById(req.params.id);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator not found.'
+      });
+    }
+
+    // Prevent rejecting own account
+    if (req.admin.id === admin._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot reject your own administrator account.'
+      });
+    }
+
+    // Prevent rejecting the sole superadmin
+    if (admin.role === 'superadmin') {
+      const superadminCount = await Admin.countDocuments({ role: 'superadmin', status: 'approved' });
+      if (superadminCount <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot reject the primary superadmin account.'
+        });
+      }
+    }
+
+    admin.status = 'rejected';
+    await admin.save();
+
+    res.status(200).json({
+      success: true,
+      message: `Account request for ${admin.name} has been rejected.`,
+      admin: {
+        id: admin._id,
+        name: admin.name,
+        email: admin.email,
+        role: admin.role,
+        status: admin.status
+      }
+    });
+  } catch (error) {
+    console.error('[Auth Reject Admin Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to reject administrator.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * DELETE /api/auth/admins/:id
+ * Remove an administrator (Protected)
+ */
+router.delete('/admins/:id', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const admin = await Admin.findById(req.params.id);
+    if (!admin) {
+      return res.status(404).json({
+        success: false,
+        message: 'Administrator not found.'
+      });
+    }
+
+    // Prevent self-deletion
+    if (req.admin.id === admin._id.toString()) {
+      return res.status(400).json({
+        success: false,
+        message: 'You cannot delete your own administrator account.'
+      });
+    }
+
+    // Prevent deleting the last superadmin
+    if (admin.role === 'superadmin') {
+      const superadminCount = await Admin.countDocuments({ role: 'superadmin' });
+      if (superadminCount <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Cannot delete the only superadmin account.'
+        });
+      }
+    }
+
+    await Admin.findByIdAndDelete(req.params.id);
+
+    res.status(200).json({
+      success: true,
+      message: `Administrator ${admin.name} removed successfully.`
+    });
+  } catch (error) {
+    console.error('[Auth Delete Admin Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to delete administrator.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * GET /api/auth/invite-key
+ * Get current dynamic admin invite key (Protected)
+ */
+router.get('/invite-key', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const inviteKey = await getActiveInviteKey();
+    res.status(200).json({
+      success: true,
+      inviteKey
+    });
+  } catch (error) {
+    console.error('[Auth Get Invite Key Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to retrieve invite key.',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/auth/invite-key
+ * Update dynamic admin invite key in database (Protected)
+ */
+router.put('/invite-key', requireAdminAuth, async (req, res) => {
+  if (mongoose.connection.readyState !== 1) {
+    return res.status(503).json({
+      success: false,
+      message: 'Database disconnected: Unable to reach MongoDB'
+    });
+  }
+
+  try {
+    const { inviteKey } = req.body;
+
+    if (!inviteKey || typeof inviteKey !== 'string' || inviteKey.trim().length < 6) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invite key must be at least 6 characters long.'
+      });
+    }
+
+    const trimmedKey = inviteKey.trim();
+
+    await Setting.findOneAndUpdate(
+      { key: 'admin_invite_key' },
+      {
+        key: 'admin_invite_key',
+        value: trimmedKey,
+        description: 'Dynamic administrative invite registration key'
+      },
+      { upsert: true, new: true, setDefaultsOnInsert: true }
+    );
+
+    res.status(200).json({
+      success: true,
+      message: 'Administrative invite key updated successfully.',
+      inviteKey: trimmedKey
+    });
+  } catch (error) {
+    console.error('[Auth Update Invite Key Error]:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to update invite key.',
       error: error.message
     });
   }
@@ -1584,7 +1994,6 @@ router.post('/logout', (req, res) => {
 });
 
 export default router;
-
 
 ```
 
@@ -3413,6 +3822,84 @@ export default router;
 
 ```
 
+## File: `server/scripts/updateAdminStatus.js`
+
+```javascript
+import mongoose from 'mongoose';
+import dotenv from 'dotenv';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.join(__dirname, '../.env') });
+
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URI || 'mongodb://127.0.0.1:27017/grabmykey';
+
+async function run() {
+  try {
+    try {
+      await mongoose.connect(MONGODB_URI, { serverSelectionTimeoutMS: 2000 });
+      console.log('Connected to MongoDB via URI');
+    } catch {
+      if (fs.existsSync('/tmp/mongodb-27017.sock')) {
+        await mongoose.connect('mongodb://%2Ftmp%2Fmongodb-27017.sock/grabmykey', { serverSelectionTimeoutMS: 2000 });
+        console.log('Connected to MongoDB via Unix domain socket');
+      } else {
+        throw new Error('Unable to reach MongoDB via URI or socket');
+      }
+    }
+
+    const collection = mongoose.connection.collection('admins');
+    
+    // Fetch all current admin documents
+    const currentAdmins = await collection.find({}).toArray();
+    console.log(`\n[Current Database Admins: ${currentAdmins.length}]`);
+    for (const a of currentAdmins) {
+      console.log(`  - ID: ${a._id} | Email: ${a.email} | Name: ${a.name} | Role: ${a.role || 'none'} | Status: ${a.status || 'none'}`);
+    }
+
+    // Execute update for documents where status doesn't exist or email is contact@grabmykey.in
+    const updateResult = await collection.updateMany(
+      {
+        $or: [
+          { status: { $exists: false } },
+          { status: null },
+          { email: 'contact@grabmykey.in' }
+        ]
+      },
+      {
+        $set: {
+          status: 'approved',
+          role: 'superadmin'
+        }
+      }
+    );
+
+    console.log(`\n[Update Result] Matched: ${updateResult.matchedCount}, Modified: ${updateResult.modifiedCount}`);
+
+    // Verify state after update
+    const finalAdmins = await collection.find({}).toArray();
+    console.log(`\n[Final Database Admins: ${finalAdmins.length}]`);
+    for (const a of finalAdmins) {
+      console.log(`  ✓ ID: ${a._id} | Email: ${a.email} | Name: ${a.name} | Role: ${a.role} | Status: ${a.status}`);
+    }
+
+    await mongoose.disconnect();
+    console.log('\nMigration complete.');
+    process.exit(0);
+  } catch (err) {
+    console.error('Migration error:', err);
+    process.exit(1);
+  }
+}
+
+run();
+
+
+```
+
 ## File: `server/server.js`
 
 ```javascript
@@ -3420,6 +3907,7 @@ import express from 'express';
 import mongoose from 'mongoose';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import propertyRoutes from './routes/propertyRoutes.js';
@@ -3559,7 +4047,47 @@ const startServer = async () => {
     console.log(`Connected to MongoDB at: ${MONGODB_URI.split('@').pop()}`);
   } catch (err) {
     console.warn(`[MongoDB Warning] ${err.message}`);
-    console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    // If local socket exists and TCP connection failed (e.g. sandbox environment), attempt unix domain socket fallback
+    if (fs.existsSync('/tmp/mongodb-27017.sock')) {
+      try {
+        console.log('Attempting connection via Unix domain socket /tmp/mongodb-27017.sock...');
+        await mongoose.connect('mongodb://%2Ftmp%2Fmongodb-27017.sock/grabmykey', {
+          serverSelectionTimeoutMS: 3000
+        });
+        console.log('Connected to MongoDB via local Unix socket (/tmp/mongodb-27017.sock)');
+      } catch (sockErr) {
+        console.warn(`[Unix Socket Warning] ${sockErr.message}`);
+      }
+    }
+    if (mongoose.connection.readyState !== 1) {
+      console.warn('[MongoDB Info] Ensure MongoDB is running locally (mongod) or provide a valid MONGODB_URI in server/.env');
+    }
+  }
+
+  // Legacy Admin Status & Primary Superadmin Startup Migration
+  if (mongoose.connection.readyState === 1) {
+    try {
+      const updateResult = await mongoose.connection.collection('admins').updateMany(
+        {
+          $or: [
+            { status: { $exists: false } },
+            { status: null },
+            { email: 'contact@grabmykey.in' }
+          ]
+        },
+        {
+          $set: {
+            status: 'approved',
+            role: 'superadmin'
+          }
+        }
+      );
+      if (updateResult.modifiedCount > 0) {
+        console.log(`[Admin Migration] Successfully migrated ${updateResult.modifiedCount} admin record(s) to approved superadmin.`);
+      }
+    } catch (migrationErr) {
+      console.warn(`[Admin Migration Warning]: ${migrationErr.message}`);
+    }
   }
 
   app.listen(PORT, '0.0.0.0', () => {
@@ -3586,7 +4114,7 @@ import {
   FileText, ShieldCheck, Layers, Car,
   FileCheck, ArrowUpRight, Play, FolderCog, Tag, Filter,
   ChevronUp, ChevronDown, Footprints, Train, Plane,
-  TrendingUp, Image as ImageIcon, Star
+  TrendingUp, Image as ImageIcon, Star, Clock, KeyRound, AlertCircle, EyeOff
 } from 'lucide-react';
 
 import {
@@ -3604,12 +4132,20 @@ import {
   updatePreset,
   deletePreset,
   seedDefaultPresets,
-  checkServerHealth
+  checkServerHealth,
+  fetchAdmins,
+  approveAdmin,
+  rejectAdmin,
+  deleteAdmin,
+  fetchInviteKey,
+  updateInviteKey,
+  getStoredAdminUser
 } from './api';
 import { DEFAULT_MASTER_PRESETS, ASSET_SPEC_PRESETS, getAssetSpecPresets } from './defaultPresets';
 import Navbar from './components/admin/Navbar';
 import Sidebar from './components/admin/Sidebar';
 import AddCustomItemModal from './components/AddCustomItemModal';
+import { toast } from 'sonner';
 
 
 
@@ -3722,6 +4258,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Dynamically derive base admin path to support both /admin and legacy /manage-345
+  const baseAdminPath = location.pathname.startsWith('/manage-345') ? '/manage-345' : '/admin';
+
   // Active view tab state derived from URL or internal selection
   const isPublishRoute = location.pathname.includes('publish-listing');
   const isMasterPresetsRoute = location.pathname.includes('master-presets');
@@ -3772,6 +4311,16 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     status: 'Verified'
   });
 
+  // Admin Access & Security state
+  const [adminsList, setAdminsList] = useState([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [currentInviteKey, setCurrentInviteKey] = useState('');
+  const [inviteKeyInput, setInviteKeyInput] = useState('');
+  const [showConsoleInviteKey, setShowConsoleInviteKey] = useState(false);
+  const [inviteKeySaving, setInviteKeySaving] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState(null);
+  const currentAdminUser = getStoredAdminUser();
+
   // Hero Featured Video & Settings state
   const [heroSettings, setHeroSettings] = useState({
     heroFeaturedPropertyId: '',
@@ -3789,6 +4338,40 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     property: null,
     isDeleting: false
   });
+
+  // Dedicated Clean Confirmation Modal State (Replacing native window.confirm)
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+    isDestructive: true,
+    onConfirm: null
+  });
+
+  const requestConfirmation = ({
+    title,
+    message,
+    confirmText = 'Confirm',
+    cancelText = 'Cancel',
+    isDestructive = true,
+    onConfirm
+  }) => {
+    setConfirmModalState({
+      isOpen: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      isDestructive,
+      onConfirm
+    });
+  };
+
+  const handleCloseConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   // Dynamic feature selector based on category and presets (defaults to false / Not Included for new listings)
   const getFeaturesForCategory = (cat, defaultAvailable = false) => {
@@ -3846,7 +4429,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const handleSavePreset = async (e) => {
     e.preventDefault();
     if (!presetFormData.title || !presetFormData.title.trim()) {
-      alert('Please enter a title / document name.');
+      toast.error('Please enter a title / document name.');
       return;
     }
 
@@ -3859,6 +4442,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         } else {
           setPresets(prev => prev.map(p => (String(p._id) === String(editingPresetId) || String(p.id) === String(editingPresetId)) ? { ...p, ...presetFormData } : p));
         }
+        toast.success('Master preset updated successfully.');
       } else {
         const res = await createPreset(presetFormData);
         if (res?.success && res.data) {
@@ -3867,6 +4451,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           const fallbackItem = { ...presetFormData, _id: `local-${Date.now()}` };
           setPresets(prev => [...prev, fallbackItem]);
         }
+        toast.success('New master preset created.');
       }
       setShowPresetModal(false);
     } catch (err) {
@@ -3876,22 +4461,30 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       } else {
         setPresets(prev => [...prev, { ...presetFormData, _id: `local-${Date.now()}` }]);
       }
+      toast.info('Preset saved locally.');
       setShowPresetModal(false);
     } finally {
       setIsSavingPreset(false);
     }
   };
 
-  const handleDeletePreset = async (id) => {
-    if (!window.confirm('Delete this master preset? Listings already published will retain their existing records.')) {
-      return;
-    }
-    try {
-      await deletePreset(id);
-    } catch (err) {
-      console.warn('Deleted preset locally:', err.message);
-    }
-    setPresets(prev => prev.filter(p => String(p._id) !== String(id) && String(p.id) !== String(id)));
+  const handleDeletePreset = (id) => {
+    requestConfirmation({
+      title: 'Delete Master Preset',
+      message: 'Delete this master preset? Listings already published will retain their existing records.',
+      confirmText: 'Delete Preset',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await deletePreset(id);
+          toast.success('Master preset deleted.');
+        } catch (err) {
+          console.warn('Deleted preset locally:', err.message);
+          toast.info('Preset removed locally.');
+        }
+        setPresets(prev => prev.filter(p => String(p._id) !== String(id) && String(p.id) !== String(id)));
+      }
+    });
   };
 
   const handleTogglePresetActive = async (item) => {
@@ -3905,23 +4498,28 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     }
   };
 
-  const handleSeedDefaults = async () => {
-    if (!window.confirm('Reset master presets to statutory GrabMyKey defaults? Custom presets will be refreshed.')) {
-      return;
-    }
-    try {
-      const res = await seedDefaultPresets();
-      if (res?.success && Array.isArray(res.data)) {
-        setPresets(res.data);
-      } else {
-        setPresets(DEFAULT_MASTER_PRESETS);
+  const handleSeedDefaults = () => {
+    requestConfirmation({
+      title: 'Reset Master Presets',
+      message: 'Reset master presets to statutory GrabMyKey defaults? Custom presets will be refreshed.',
+      confirmText: 'Reset Defaults',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await seedDefaultPresets();
+          if (res?.success && Array.isArray(res.data)) {
+            setPresets(res.data);
+          } else {
+            setPresets(DEFAULT_MASTER_PRESETS);
+          }
+          toast.success('Master presets reset to statutory defaults successfully!');
+        } catch (err) {
+          console.warn('Using local default master presets:', err.message);
+          setPresets(DEFAULT_MASTER_PRESETS);
+          toast.info('Master presets reset to statutory defaults.');
+        }
       }
-      alert('Master presets reset to statutory defaults successfully!');
-    } catch (err) {
-      console.warn('Using local default master presets:', err.message);
-      setPresets(DEFAULT_MASTER_PRESETS);
-      alert('Master presets reset to statutory defaults.');
-    }
+    });
   };
 
   // Load database data on mount
@@ -3968,10 +4566,104 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       } catch (presetErr) {
         console.warn('Using default master presets:', presetErr.message);
       }
+
+      try {
+        await loadAdminsAndInviteKey();
+      } catch (adminErr) {
+        console.warn('Could not load admins list:', adminErr.message);
+      }
     } catch (err) {
       console.warn('Admin running on cached state:', err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAdminsAndInviteKey = async () => {
+    setAdminsLoading(true);
+    try {
+      const [adminsRes, keyRes] = await Promise.allSettled([
+        fetchAdmins(),
+        fetchInviteKey()
+      ]);
+      if (adminsRes.status === 'fulfilled' && adminsRes.value?.success && Array.isArray(adminsRes.value.admins)) {
+        setAdminsList(adminsRes.value.admins);
+      }
+      if (keyRes.status === 'fulfilled' && keyRes.value?.success && keyRes.value.inviteKey) {
+        setCurrentInviteKey(keyRes.value.inviteKey);
+        setInviteKeyInput(keyRes.value.inviteKey);
+      }
+    } catch (err) {
+      console.warn('Error loading admin security directory:', err);
+    } finally {
+      setAdminsLoading(false);
+    }
+  };
+
+  const handleApproveAdmin = async (id) => {
+    try {
+      const res = await approveAdmin(id);
+      if (res?.success) {
+        setSecurityMessage({ type: 'success', text: res.message || 'Administrator account approved.' });
+        await loadAdminsAndInviteKey();
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to approve administrator.' });
+    }
+  };
+
+  const handleRejectAdmin = async (id) => {
+    try {
+      const res = await rejectAdmin(id);
+      if (res?.success) {
+        setSecurityMessage({ type: 'success', text: res.message || 'Administrator account rejected.' });
+        await loadAdminsAndInviteKey();
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to reject administrator.' });
+    }
+  };
+
+  const handleDeleteAdmin = (id, name) => {
+    requestConfirmation({
+      title: 'Remove Administrator',
+      message: `Are you sure you want to remove administrator "${name}"? This action will revoke all access for this account.`,
+      confirmText: 'Remove Admin',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await deleteAdmin(id);
+          if (res?.success) {
+            setSecurityMessage({ type: 'success', text: res.message || 'Administrator removed.' });
+            toast.success(`Administrator ${name} removed.`);
+            await loadAdminsAndInviteKey();
+          }
+        } catch (err) {
+          const errMsg = err.response?.data?.message || err.message || 'Failed to remove administrator.';
+          setSecurityMessage({ type: 'error', text: errMsg });
+          toast.error(errMsg);
+        }
+      }
+    });
+  };
+
+  const handleSaveInviteKey = async (e) => {
+    e.preventDefault();
+    if (!inviteKeyInput || inviteKeyInput.trim().length < 6) {
+      setSecurityMessage({ type: 'error', text: 'Invite key must be at least 6 characters long.' });
+      return;
+    }
+    setInviteKeySaving(true);
+    try {
+      const res = await updateInviteKey(inviteKeyInput.trim());
+      if (res?.success) {
+        setCurrentInviteKey(res.inviteKey);
+        setSecurityMessage({ type: 'success', text: 'Dynamic invite key updated successfully.' });
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to update invite key.' });
+    } finally {
+      setInviteKeySaving(false);
     }
   };
 
@@ -3991,14 +4683,15 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   // Navigation handlers
   const handleTabSwitch = (tabName) => {
-    if (tabName === 'publish-listing') {
-      navigate('/manage-345/publish-listing');
-    } else if (tabName === 'master-presets') {
-      navigate('/manage-345/master-presets');
+    const targetTab = tabName === 'hero' ? 'hero-settings' : tabName;
+    if (targetTab === 'publish-listing') {
+      navigate(`${baseAdminPath}/publish-listing`);
+    } else if (targetTab === 'master-presets') {
+      navigate(`${baseAdminPath}/master-presets`);
     } else {
-      setInternalTab(tabName);
-      if (location.pathname !== '/manage-345') {
-        navigate('/manage-345');
+      setInternalTab(targetTab);
+      if (location.pathname !== baseAdminPath) {
+        navigate(baseAdminPath);
       }
     }
   };
@@ -4007,7 +4700,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setEditingPropertyId(null);
     setFormData(INITIAL_FORM_STATE);
     setFormStep(1);
-    navigate('/manage-345/publish-listing');
+    navigate(`${baseAdminPath}/publish-listing`);
   };
 
   const handleCancelForm = () => {
@@ -4110,7 +4803,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       localityGrowthDriver: prop.investmentAnalysis?.localityGrowthDriver || 'High-growth corridor with infrastructure development'
     });
     setFormStep(1);
-    navigate('/manage-345/publish-listing');
+    navigate(`${baseAdminPath}/publish-listing`);
   };
 
   // CRUD Property actions & Custom Confirmation Modal
@@ -4206,14 +4899,23 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setLeads(prev => prev.map(l => ((l._id || l.id) === leadId ? { ...l, status: newStatus } : l)));
   };
 
-  const handleDeleteLead = async (leadId) => {
-    if (!window.confirm('Remove this lead inquiry from the queue?')) return;
-    try {
-      await deleteLead(leadId);
-    } catch (err) {
-      console.warn('Backend lead delete error:', err.message);
-    }
-    setLeads(prev => prev.filter(l => (l._id || l.id) !== leadId));
+  const handleDeleteLead = (leadId) => {
+    requestConfirmation({
+      title: 'Remove Inbound Lead',
+      message: 'Remove this lead inquiry from the queue?',
+      confirmText: 'Remove Lead',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteLead(leadId);
+          toast.success('Lead inquiry removed.');
+        } catch (err) {
+          console.warn('Backend lead delete error:', err.message);
+          toast.info('Lead inquiry removed locally.');
+        }
+        setLeads(prev => prev.filter(l => (l._id || l.id) !== leadId));
+      }
+    });
   };
 
   // Hero Featured Video Handlers
@@ -4252,10 +4954,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         window.dispatchEvent(new CustomEvent('grabmykey_settings_updated', { detail: res.data }));
         setHeroSaveSuccess(true);
         setTimeout(() => setHeroSaveSuccess(false), 3000);
+        toast.success('Hero Video settings updated successfully.');
         if (onDataUpdated) onDataUpdated();
       }
     } catch (err) {
-      alert('Failed to save Hero Settings: ' + err.message);
+      toast.error('Failed to save Hero Settings: ' + err.message);
     } finally {
       setIsSavingHeroSettings(false);
     }
@@ -4327,12 +5030,19 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   const handleResetDefaultFeatures = () => {
     const cat = formData.category || 'Villa';
-    if (window.confirm(`Reset feature matrix to standard ${cat} master template?`)) {
-      setFormData(prev => ({
-        ...prev,
-        componentsMatrix: getFeaturesForCategory(cat)
-      }));
-    }
+    requestConfirmation({
+      title: 'Reset Feature Matrix',
+      message: `Reset feature matrix to standard ${cat} master template? Any custom modifications will be reset.`,
+      confirmText: 'Apply Template',
+      isDestructive: false,
+      onConfirm: () => {
+        setFormData(prev => ({
+          ...prev,
+          componentsMatrix: getFeaturesForCategory(cat)
+        }));
+        toast.success(`Feature matrix reset to ${cat} template.`);
+      }
+    });
   };
 
   // Manual Strategic Transit Handlers
@@ -4450,7 +5160,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   const handleConfirmCustomModal = () => {
     if (!customItemModal.title.trim()) {
-      alert('Please enter a valid title.');
+      toast.error('Please enter a valid title.');
       return;
     }
     if (customItemModal.type === 'FEATURE') {
@@ -4676,14 +5386,14 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         const updatedDoc = res?.data || propertyPayload;
         setProperties(prev => prev.map(p => (String(p._id || p.id) === String(editingPropertyId) ? { ...p, ...propertyPayload, ...updatedDoc } : p)));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
-        alert(`Listing #${editingPropertyId} (${propertyPayload.title}) updated successfully!`);
+        toast.success(`Listing #${editingPropertyId} (${propertyPayload.title}) updated successfully!`);
       } else {
         const res = await createProperty(propertyPayload);
         const newRecord = res?.data || { ...propertyPayload, _id: String(Date.now()), id: String(Date.now()) };
         setProperties(prev => [newRecord, ...prev]);
         window.dispatchEvent(new CustomEvent('grabmykey_property_created', { detail: newRecord }));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
-        alert(`New property listing "${newRecord.title}" published live to catalog!`);
+        toast.success(`New property listing "${newRecord.title}" published live to catalog!`);
       }
     } catch (err) {
       console.error('API submission error:', err);
@@ -4695,9 +5405,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         err.message?.includes('connection refused')
       );
       if (isServerOffline) {
-        alert("Backend server is offline. Please start Node server on port 5000.");
+        toast.warning("Backend server is offline. Please start Node server on port 5000.");
       } else {
-        alert(`Submission error: ${err.message || 'Could not connect to backend server'}`);
+        toast.error(`Submission error: ${err.message || 'Could not connect to backend server'}`);
       }
     } finally {
       // Clear editing ID and form state so future creates don't overwrite or duplicate
@@ -4847,6 +5557,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         propertiesCount={properties.length}
         newLeadsCount={leads.filter(l => l.status === 'New Inquiry').length}
         presetsCount={presets.length}
+        pendingAdminsCount={adminsList.filter(a => a.status === 'pending').length}
         onExit={onExit || (() => navigate('/'))}
       />
 
@@ -7278,6 +7989,303 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
               </div>
             )}
 
+            {/* =============================================================== */}
+            {/* VIEW 7: ADMIN ACCESS & SECURITY MANAGER                          */}
+            {/* =============================================================== */}
+            {activeTab === 'admin-security' && (
+              <div className="space-y-8 w-full max-w-6xl mx-auto pb-12">
+
+                {/* Header Title & Refresh */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <ShieldCheck className="w-6 h-6 text-[#b8860b]" />
+                      <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight">
+                        Admin Access & Security
+                      </h1>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Manage administrative personnel, approve access requests, and rotate the dynamic invite registration key.
+                    </p>
+                  </div>
+                  <button
+                    onClick={loadAdminsAndInviteKey}
+                    disabled={adminsLoading}
+                    className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-[#0a1d37] border border-slate-300 bg-white hover:bg-slate-50 px-3 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${adminsLoading ? 'animate-spin text-[#b8860b]' : ''}`} />
+                    <span>Refresh Directory</span>
+                  </button>
+                </div>
+
+                {/* Status / Alert Banner */}
+                {securityMessage && (
+                  <div className={`p-4 rounded-xl border text-xs flex items-center justify-between animate-fadeIn ${
+                    securityMessage.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}>
+                    <div className="flex items-center space-x-2">
+                      {securityMessage.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      )}
+                      <span className="font-medium">{securityMessage.text}</span>
+                    </div>
+                    <button
+                      onClick={() => setSecurityMessage(null)}
+                      className="text-slate-400 hover:text-slate-600 ml-4 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Dynamic Admin Invite Key Section */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-[#b8860b] shrink-0">
+                        <KeyRound className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                            Dynamic Admin Invite Key
+                          </h2>
+                          {currentInviteKey && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Prospective administrators must supply this key when registering an account. Rotate periodically for enhanced security.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSaveInviteKey} className="max-w-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type={showConsoleInviteKey ? 'text' : 'password'}
+                        value={inviteKeyInput}
+                        onChange={(e) => setInviteKeyInput(e.target.value)}
+                        placeholder="Enter dynamic invite key (min. 6 characters)"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-4 pr-10 py-2.5 text-xs sm:text-sm text-slate-900 font-mono tracking-wider focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConsoleInviteKey(!showConsoleInviteKey)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                        title={showConsoleInviteKey ? 'Hide key' : 'Show key'}
+                      >
+                        {showConsoleInviteKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={inviteKeySaving || !inviteKeyInput || inviteKeyInput.trim().length < 6}
+                      className="bg-[#0a1d37] hover:bg-[#13233D] disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-xs sm:text-sm transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer shrink-0"
+                    >
+                      {inviteKeySaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Update Invite Key</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Pending Registration Requests */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                          Pending Registration Requests
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          New admin accounts awaiting verification from an active administrator.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                      adminsList.filter(a => a.status === 'pending').length > 0
+                        ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {adminsList.filter(a => a.status === 'pending').length} Pending
+                    </span>
+                  </div>
+
+                  {adminsList.filter(a => a.status === 'pending').length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500/60 mb-2" />
+                      <p className="font-medium text-slate-600">No pending requests</p>
+                      <p className="text-slate-400 mt-0.5">All administrator registrations have been processed.</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {adminsList.filter(a => a.status === 'pending').map((pendingAdmin) => (
+                        <div key={pendingAdmin._id || pendingAdmin.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-semibold text-sm text-[#0a1d37]">{pendingAdmin.name}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800">
+                                Awaiting Approval
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 flex items-center space-x-3">
+                              <span>{pendingAdmin.email}</span>
+                              <span>•</span>
+                              <span>Requested {new Date(pendingAdmin.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handleApproveAdmin(pendingAdmin._id || pendingAdmin.id)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Approve Access</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRejectAdmin(pendingAdmin._id || pendingAdmin.id)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Reject</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Active Administrators Directory */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                          Administrative Directory
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          All authorized system administrators and their operational status.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                      {adminsList.filter(a => a.status !== 'pending').length} Total
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50/70 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
+                          <th className="py-3 px-4">Administrator</th>
+                          <th className="py-3 px-4">Role</th>
+                          <th className="py-3 px-4">Status</th>
+                          <th className="py-3 px-4">Last Login</th>
+                          <th className="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {adminsList.filter(a => a.status !== 'pending').map((admin) => {
+                          const isSelf = currentAdminUser && (admin._id === currentAdminUser.id || admin.id === currentAdminUser.id || admin.email === currentAdminUser.email);
+                          return (
+                            <tr key={admin._id || admin.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="font-semibold text-slate-900 flex items-center space-x-1.5">
+                                  <span>{admin.name}</span>
+                                  {isSelf && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                      You
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-slate-500 text-[11px]">{admin.email}</div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  admin.role === 'superadmin'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {admin.role || 'admin'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  admin.status === 'approved'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : admin.status === 'rejected'
+                                    ? 'bg-red-50 text-red-700 border border-red-200'
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                }`}>
+                                  {admin.status || 'approved'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                                {admin.lastLogin
+                                  ? new Date(admin.lastLogin).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                  : 'Never'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                {admin.status === 'rejected' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveAdmin(admin._id || admin.id)}
+                                    className="text-emerald-700 hover:text-emerald-800 font-semibold text-xs px-2 py-1 rounded hover:bg-emerald-50 transition-colors mr-2 cursor-pointer"
+                                  >
+                                    Re-Approve
+                                  </button>
+                                ) : null}
+                                {!isSelf && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAdmin(admin._id || admin.id, admin.name)}
+                                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                                    title={`Remove ${admin.name}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
           </div>
         </main>
 
@@ -7638,6 +8646,65 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         </div>
       )}
 
+      {/* DEDICATED CLEAN CONFIRMATION MODAL */}
+      {confirmModalState.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-slate-800 animate-in zoom-in-95 duration-150">
+            {/* Top Close Button */}
+            <button
+              type="button"
+              onClick={handleCloseConfirmModal}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Icon & Message */}
+            <div className="mb-4">
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-3 ${
+                confirmModalState.isDestructive
+                  ? 'bg-red-50 border border-red-200 text-red-600'
+                  : 'bg-amber-50 border border-amber-200 text-[#b8860b]'
+              }`}>
+                {confirmModalState.isDestructive ? <Trash2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+              </div>
+              <h3 className="text-lg font-serif font-bold text-slate-900">
+                {confirmModalState.title}
+              </h3>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                {confirmModalState.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={handleCloseConfirmModal}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                {confirmModalState.cancelText || 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const cb = confirmModalState.onConfirm;
+                  handleCloseConfirmModal();
+                  if (cb) cb();
+                }}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center space-x-1.5 ${
+                  confirmModalState.isDestructive
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-[#0a1d37] hover:bg-[#13233D]'
+                }`}
+              >
+                <span>{confirmModalState.confirmText || 'Confirm'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
@@ -7979,7 +9046,12 @@ export default function App() {
   const currentPath = location.pathname;
   const isAdminLoginRoute = currentPath === '/admin/login';
   const isAdminSignupRoute = currentPath === '/admin/signup';
-  const isAdminConsoleRoute = (currentPath === '/admin' || currentPath.startsWith('/admin/') || currentPath.startsWith('/manage-345')) && !isAdminLoginRoute && !isAdminSignupRoute;
+  const isAdminConsoleRoute = (
+    currentPath === '/admin' ||
+    currentPath.startsWith('/admin/') ||
+    currentPath === '/manage-345' ||
+    currentPath.startsWith('/manage-345/')
+  ) && !isAdminLoginRoute && !isAdminSignupRoute;
   const isPropertyDetailRoute = currentPath.startsWith('/property/');
   const propertyIdFromUrl = isPropertyDetailRoute ? currentPath.replace(/^\/property\//, '').split('/')[0] : null;
 
@@ -8128,7 +9200,7 @@ export default function App() {
       if (e.ctrlKey && e.shiftKey && (e.key === 'A' || e.key === 'a')) {
         e.preventDefault();
         if (getStoredAdminToken()) {
-          navigate('/manage-345');
+          navigate('/admin');
         } else {
           navigate('/admin/login');
         }
@@ -8324,7 +9396,7 @@ export default function App() {
       <AdminLogin
         onLoginSuccess={() => {
           setIsAdminLoggedIn(true);
-          navigate('/manage-345');
+          navigate('/admin');
         }}
       />
     );
@@ -8338,14 +9410,14 @@ export default function App() {
       <AdminSignup
         onSignupSuccess={() => {
           setIsAdminLoggedIn(true);
-          navigate('/manage-345');
+          navigate('/admin');
         }}
       />
     );
   }
 
   // =========================================================================
-  // VIEW: EXECUTIVE ADMIN SUITE (/manage-345 & /admin/*)
+  // VIEW: EXECUTIVE ADMIN SUITE (/admin/*)
   // Strictly protected by verified JWT session token
   // =========================================================================
   if (isAdminConsoleRoute) {
@@ -8795,7 +9867,7 @@ export const fetchPropertyById = async (id) => {
   return { success: false, data: null };
 };
 
-// Create a new property listing (Admin PIN verified)
+// Create a new property listing (Admin auth verified)
 export const createProperty = async (propertyData) => {
   return await apiClient.post('/properties', propertyData);
 };
@@ -9037,6 +10109,33 @@ export const adminLogout = async () => {
   return { success: true };
 };
 
+/**
+ * Admin Access & Security Management
+ */
+export const fetchAdmins = async () => {
+  return await apiClient.get('/auth/admins');
+};
+
+export const approveAdmin = async (id) => {
+  return await apiClient.patch(`/auth/admins/${id}/approve`);
+};
+
+export const rejectAdmin = async (id) => {
+  return await apiClient.patch(`/auth/admins/${id}/reject`);
+};
+
+export const deleteAdmin = async (id) => {
+  return await apiClient.delete(`/auth/admins/${id}`);
+};
+
+export const fetchInviteKey = async () => {
+  return await apiClient.get('/auth/invite-key');
+};
+
+export const updateInviteKey = async (inviteKey) => {
+  return await apiClient.put('/auth/invite-key', { inviteKey });
+};
+
 export default {
   fetchProperties,
   fetchPropertyById,
@@ -9059,6 +10158,12 @@ export default {
   adminSignup,
   adminVerifyToken,
   adminLogout,
+  fetchAdmins,
+  approveAdmin,
+  rejectAdmin,
+  deleteAdmin,
+  fetchInviteKey,
+  updateInviteKey,
   getStoredAdminToken,
   getStoredAdminUser
 };
@@ -9285,7 +10390,7 @@ export default function FeaturedProperties({ properties: initialProperties = [],
         </p>
         <div className="pt-2">
           <Link
-            to="/manage-345"
+            to="/admin"
             className="inline-flex items-center space-x-1.5 px-4 py-2 bg-[#0F172A] hover:bg-[#C59B27] text-white rounded-xl text-xs font-semibold transition-colors font-sans shadow-sm"
           >
             <span>Open Admin Panel</span>
@@ -10948,6 +12053,7 @@ import { API_ENDPOINTS } from '../config/api';
 import { getAssetSpecPresets } from '../defaultPresets';
 import AddCustomItemModal from './AddCustomItemModal';
 import PublishSuccessModal from './PublishSuccessModal';
+import { toast } from 'sonner';
 
 export default function PublishListingPage({ onExit, onSaveProperty }) {
   const navigate = useNavigate();
@@ -10957,7 +12063,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     if (window.history.length > 1) {
       navigate(-1);
     } else {
-      navigate('/manage-345');
+      navigate('/admin');
     }
   };
 
@@ -11360,7 +12466,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddCategory = () => {
     const catName = categoryModalData.categoryName.trim();
     if (!catName) {
-      alert('Please enter a category name.');
+      toast.error('Please enter a category name.');
       return;
     }
     if (!customCategories.includes(catName)) {
@@ -11384,7 +12490,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddFeature = () => {
     const featName = featureModalData.featureName.trim();
     if (!featName) {
-      alert('Please enter a feature name / title.');
+      toast.error('Please enter a feature name / title.');
       return;
     }
     setComponentsMatrix(prev => [
@@ -11403,7 +12509,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
   const handleConfirmAddLegalCheck = () => {
     const docName = legalModalData.documentName.trim();
     if (!docName) {
-      alert('Please enter statutory clearance or document title.');
+      toast.error('Please enter statutory clearance or document title.');
       return;
     }
     const newItem = {
@@ -11436,7 +12542,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
     }
 
     if (!title || !title.trim()) {
-      alert('Please enter a property title.');
+      toast.error('Please enter a property title.');
       setFormStep(1);
       return;
     }
@@ -11606,10 +12712,10 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
       if (isServerOffline) {
         const offlineMsg = "Backend server is offline. Please start Node server on port 5000.";
         setSubmitError(offlineMsg);
-        alert(offlineMsg);
+        toast.warning(offlineMsg);
       } else {
         setSubmitError(err.message || 'Failed to submit listing. Please try again.');
-        alert(`Submission error: ${err.message || 'Could not connect to backend server'}`);
+        toast.error(`Submission error: ${err.message || 'Could not connect to backend server'}`);
       }
     } finally {
       setIsSubmitting(false);
@@ -11717,7 +12823,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
 
                 <div className="hidden sm:flex items-center space-x-2">
                   <span className="text-xs font-mono text-slate-400">
-                    Route: <span className="text-[#b8860b] font-semibold">/manage-345/publish-listing</span>
+                    Route: <span className="text-[#b8860b] font-semibold">/admin/publish-listing</span>
                   </span>
                 </div>
               </div>
@@ -12856,7 +13962,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
             <span className="text-slate-300">•</span>
             <span className="text-slate-500">Executive Management Suite</span>
           </div>
-          <span className="font-mono text-[11px] text-slate-400">Route: /manage-345/publish-listing</span>
+          <span className="font-mono text-[11px] text-slate-400">Route: /admin/publish-listing</span>
         </div>
       </footer>
 
@@ -13033,7 +14139,7 @@ export default function PublishListingPage({ onExit, onSaveProperty }) {
         onBackToInventory={() => {
           setShowPublishSuccessModal(false);
           if (onExit) onExit();
-          else navigate('/manage-345');
+          else navigate('/admin');
         }}
       />
 
@@ -13094,7 +14200,7 @@ export default function PublishSuccessModal({
     if (onBackToInventory) {
       onBackToInventory();
     } else {
-      navigate('/manage-345');
+      navigate('/admin');
     }
     if (onClose) onClose();
   };
@@ -13231,7 +14337,8 @@ const TAB_LABELS = {
   leads: 'Owner Lead Queue',
   'publish-listing': 'Publish / Edit Listing',
   'hero-settings': 'Hero Video Settings',
-  'master-presets': 'System Presets & Config'
+  'master-presets': 'System Presets & Config',
+  'admin-security': 'Admin Access & Security'
 };
 
 export default function Navbar({ activeTab, onNewListing, onExit }) {
@@ -13285,6 +14392,7 @@ import {
   PlusCircle,
   Video,
   FolderCog,
+  ShieldCheck,
   LogOut
 } from 'lucide-react';
 
@@ -13295,6 +14403,7 @@ export default function Sidebar({
   propertiesCount = 0,
   newLeadsCount = 0,
   presetsCount = 0,
+  pendingAdminsCount = 0,
   onExit
 }) {
   const navItems = [
@@ -13337,6 +14446,13 @@ export default function Sidebar({
       icon: FolderCog,
       count: presetsCount,
       onClick: () => onTabSwitch('master-presets')
+    },
+    {
+      id: 'admin-security',
+      label: 'Admin Access & Security',
+      icon: ShieldCheck,
+      badgeText: pendingAdminsCount > 0 ? `${pendingAdminsCount} New` : null,
+      onClick: () => onTabSwitch('admin-security')
     }
   ];
 
@@ -13983,6 +15099,7 @@ import { BrowserRouter } from 'react-router-dom'
 import './index.css'
 import App from './App.jsx'
 import { PropertyProvider } from './context/PropertyContext'
+import { Toaster } from 'sonner'
 
 // Ensure browser storage is cleared of any legacy mock properties
 try {
@@ -13995,6 +15112,7 @@ createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <PropertyProvider>
         <App />
+        <Toaster position="top-right" richColors closeButton />
       </PropertyProvider>
     </BrowserRouter>
   </StrictMode>,
@@ -14007,7 +15125,7 @@ createRoot(document.getElementById('root')).render(
 ```jsx
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { Lock, Mail, Eye, EyeOff, ShieldCheck, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
+import { Lock, Mail, Eye, EyeOff, ArrowLeft, Loader2, AlertCircle } from 'lucide-react';
 import { adminLogin } from '../api';
 
 export default function AdminLogin({ onLoginSuccess }) {
@@ -14042,7 +15160,7 @@ export default function AdminLogin({ onLoginSuccess }) {
         if (onLoginSuccess) {
           onLoginSuccess(res.admin, res.token);
         } else {
-          navigate('/manage-345');
+          navigate('/admin');
         }
       } else {
         setErrorMessage(res?.message || 'Authentication failed. Please verify your credentials.');
@@ -14056,70 +15174,75 @@ export default function AdminLogin({ onLoginSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070D18] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(197,155,39,0.15),rgba(255,255,255,0))] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between p-4 sm:p-6 font-sans">
       
       {/* Top Header Navigation */}
-      <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-4">
+      <header className="max-w-5xl w-full mx-auto flex items-center justify-between py-4">
         <Link
           to="/"
-          className="inline-flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+          className="inline-flex items-center space-x-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Website</span>
         </Link>
-
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
-          <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
-            Encrypted Session
-          </span>
-        </div>
       </header>
 
       {/* Main Authentication Card */}
       <main className="w-full max-w-md mx-auto my-auto py-8">
-        <div className="bg-[#0D1829]/90 border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 relative overflow-hidden">
           
-          {/* Subtle gold luxury ambient accent */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+          {/* Subtle gold accent top bar */}
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#C59B27]/40 via-[#C59B27] to-[#C59B27]/40" />
 
-          {/* Brand & Crest Header */}
-          <div className="text-center mb-8">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#13233D] to-[#0A1424] border border-[#C59B27]/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/40">
-              <ShieldCheck className="w-7 h-7 text-[#C59B27]" />
+          {/* Official Brand Logo & Header */}
+          <div className="text-center mb-7 pt-2">
+            <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center p-2 mx-auto mb-3">
+              <img
+                src="/logo.png"
+                onError={(e) => { e.currentTarget.src = "/logo-icon.svg"; }}
+                alt="GrabMyKey"
+                className="w-full h-full object-contain"
+              />
             </div>
-            
-            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-[0.15em] text-white">
-              GRABMYKEY
+
+            <div
+              className="text-xl font-extrabold tracking-tight font-serif leading-none flex items-center justify-center gap-1 text-slate-900"
+              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+            >
+              <span>GRAB</span>
+              <span className="text-[#C59B27]">MY</span>
+              <span>KEY</span>
+            </div>
+            <span className="text-[9px] font-bold text-[#C59B27] uppercase tracking-widest font-sans leading-tight mt-1 block">
+              YOUR TRUSTED REAL ESTATE PARTNER
+            </span>
+
+            <h1 className="text-xl font-bold text-slate-900 mt-5">
+              Admin Sign In
             </h1>
-            
-            <div className="inline-flex items-center space-x-1.5 mt-2 px-3 py-1 rounded-full bg-[#C59B27]/10 border border-[#C59B27]/30 text-[#C59B27] text-[10px] font-bold tracking-widest uppercase font-mono">
-              <span>ADMIN PORTAL • EXECUTIVE ACCESS</span>
-            </div>
-            
-            <p className="text-xs text-slate-400 mt-3 max-w-xs mx-auto leading-relaxed">
-              Sign in with your verified administrative credentials to access the central portfolio command suite.
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed">
+              Sign in to your administrative account to manage properties, leads, and console settings.
             </p>
           </div>
 
           {/* Error Banner */}
           {errorMessage && (
-            <div className="mb-6 p-3.5 rounded-xl bg-red-950/50 border border-red-800/80 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start space-x-2.5">
+              <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
               <span className="leading-relaxed font-medium">{errorMessage}</span>
             </div>
           )}
 
           {/* Login Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-4">
             
             {/* Email Field */}
             <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Administrative Email
+              <label className="block text-xs font-semibold text-slate-700">
+                Email Address
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Mail className="w-4 h-4" />
                 </div>
                 <input
@@ -14129,7 +15252,7 @@ export default function AdminLogin({ onLoginSuccess }) {
                   placeholder="admin@grabmykey.in"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
+                  className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-sans"
                 />
               </div>
             </div>
@@ -14137,12 +15260,12 @@ export default function AdminLogin({ onLoginSuccess }) {
             {/* Password Field */}
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
+                <label className="block text-xs font-semibold text-slate-700">
                   Password
                 </label>
               </div>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
+                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
                   <Lock className="w-4 h-4" />
                 </div>
                 <input
@@ -14151,12 +15274,12 @@ export default function AdminLogin({ onLoginSuccess }) {
                   placeholder="••••••••••••"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-11 py-3 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans tracking-wider"
+                  className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-11 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-sans tracking-wider"
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                  className="absolute inset-y-0 right-0 pr-3.5 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                   title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
@@ -14166,14 +15289,14 @@ export default function AdminLogin({ onLoginSuccess }) {
 
             {/* Remember Me Option */}
             <div className="flex items-center justify-between pt-1">
-              <label className="flex items-center space-x-2 text-xs text-slate-400 cursor-pointer">
+              <label className="flex items-center space-x-2 text-xs text-slate-600 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-3.5 h-3.5 rounded border-slate-700 bg-[#08101E] text-[#C59B27] focus:ring-0 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-300 bg-white text-[#C59B27] focus:ring-[#C59B27]/30 cursor-pointer"
                 />
-                <span>Remember session on this device</span>
+                <span>Keep me signed in</span>
               </label>
             </div>
 
@@ -14181,46 +15304,41 @@ export default function AdminLogin({ onLoginSuccess }) {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-gradient-to-r from-[#B8860B] via-[#C59B27] to-[#D4AF37] hover:brightness-110 active:brightness-95 disabled:opacity-60 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-black/40 flex items-center justify-center space-x-2 cursor-pointer mt-2"
+              className="w-full bg-[#0F172A] hover:bg-[#1E293B] active:bg-[#020617] disabled:opacity-60 text-white font-semibold py-3 rounded-xl text-xs sm:text-sm transition-all shadow-md shadow-slate-900/10 flex items-center justify-center space-x-2 cursor-pointer mt-3"
             >
               {isLoading ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Verifying Credentials...</span>
+                  <Loader2 className="w-4 h-4 animate-spin text-[#C59B27]" />
+                  <span>Signing In...</span>
                 </>
               ) : (
-                <span>Authenticate & Access Console</span>
+                <span>Sign In</span>
               )}
             </button>
           </form>
 
           {/* Navigation to Signup */}
-          <div className="mt-8 pt-6 border-t border-slate-800 text-center space-y-3">
-            <p className="text-xs text-slate-400">
-              Need administrative clearance?{' '}
+          <div className="mt-7 pt-5 border-t border-slate-200 text-center">
+            <p className="text-xs text-slate-500">
+              Need administrator access?{' '}
               <Link
                 to="/admin/signup"
-                className="font-bold text-[#C59B27] hover:text-[#e0b945] underline underline-offset-4 transition-colors"
+                className="font-semibold text-[#B8860B] hover:text-[#9A7007] underline underline-offset-4 transition-colors"
               >
-                Register an Admin Profile →
+                Create Admin Account
               </Link>
-            </p>
-
-            <p className="text-[10px] text-slate-500 font-mono">
-              Mangaluru Luxury Real Estate Portfolio • Strict RBAC Protection
             </p>
           </div>
         </div>
       </main>
 
       {/* Footer Notice */}
-      <footer className="text-center py-4 text-[11px] text-slate-500 font-mono">
+      <footer className="text-center py-4 text-xs text-slate-500">
         © 2026 GrabMyKey. Authorized administrative personnel only.
       </footer>
     </div>
   );
 }
-
 
 ```
 
@@ -14230,8 +15348,8 @@ export default function AdminLogin({ onLoginSuccess }) {
 import React, { useState, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  ShieldCheck, User, Mail, Lock, KeyRound, Eye, EyeOff,
-  ArrowLeft, Check, AlertCircle, Loader2
+  User, Mail, Lock, KeyRound, Eye, EyeOff,
+  ArrowLeft, Check, AlertCircle, Loader2, Clock, CheckCircle2
 } from 'lucide-react';
 import { adminSignup } from '../api';
 
@@ -14246,14 +15364,16 @@ export default function AdminSignup({ onSignupSuccess }) {
 
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const [showInviteKey, setShowInviteKey] = useState(false);
 
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
-  const [successMessage, setSuccessMessage] = useState('');
+  const [isPendingApproval, setIsPendingApproval] = useState(false);
+  const [registeredEmail, setRegisteredEmail] = useState('');
 
   // Password strength calculation
   const passwordStrength = useMemo(() => {
-    if (!password) return { score: 0, label: 'Not Entered', color: 'bg-slate-700' };
+    if (!password) return { score: 0, label: 'Not Entered', color: 'bg-slate-200' };
     let score = 0;
     if (password.length >= 8) score += 1;
     if (password.length >= 12) score += 1;
@@ -14264,7 +15384,7 @@ export default function AdminSignup({ onSignupSuccess }) {
     if (score <= 1) return { score: 1, label: 'Weak', color: 'bg-red-500', width: 'w-1/4' };
     if (score === 2) return { score: 2, label: 'Fair', color: 'bg-amber-500', width: 'w-2/4' };
     if (score <= 4) return { score: 3, label: 'Strong', color: 'bg-[#C59B27]', width: 'w-3/4' };
-    return { score: 4, label: 'Executive Grade', color: 'bg-emerald-500', width: 'w-full' };
+    return { score: 4, label: 'Very Strong', color: 'bg-emerald-600', width: 'w-full' };
   }, [password]);
 
   // Real-time password match verification
@@ -14276,10 +15396,9 @@ export default function AdminSignup({ onSignupSuccess }) {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setErrorMessage('');
-    setSuccessMessage('');
 
     if (!name.trim()) {
-      setErrorMessage('Please enter your full administrative name.');
+      setErrorMessage('Please enter your full name.');
       return;
     }
     if (!email.trim()) {
@@ -14305,15 +15424,15 @@ export default function AdminSignup({ onSignupSuccess }) {
         inviteKey: inviteKey.trim()
       });
 
-      if (res?.success && res.token) {
-        setSuccessMessage('Administrator profile established successfully. Redirecting...');
-        setTimeout(() => {
-          if (onSignupSuccess) {
-            onSignupSuccess(res.admin, res.token);
-          } else {
-            navigate('/manage-345');
-          }
-        }, 1200);
+      if (res?.pendingApproval) {
+        setRegisteredEmail(email.trim());
+        setIsPendingApproval(true);
+      } else if (res?.success && res.token) {
+        if (onSignupSuccess) {
+          onSignupSuccess(res.admin, res.token);
+        } else {
+          navigate('/admin');
+        }
       } else {
         setErrorMessage(res?.message || 'Registration failed. Please check your credentials.');
       }
@@ -14326,273 +15445,308 @@ export default function AdminSignup({ onSignupSuccess }) {
   };
 
   return (
-    <div className="min-h-screen bg-[#070D18] bg-[radial-gradient(ellipse_80%_80%_at_50%_-20%,rgba(197,155,39,0.15),rgba(255,255,255,0))] text-slate-100 flex flex-col justify-between p-4 sm:p-6 font-sans">
+    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col justify-between p-4 sm:p-6 font-sans">
       
       {/* Top Header Navigation */}
-      <header className="max-w-6xl w-full mx-auto flex items-center justify-between py-4">
+      <header className="max-w-5xl w-full mx-auto flex items-center justify-between py-4">
         <Link
           to="/"
-          className="inline-flex items-center space-x-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+          className="inline-flex items-center space-x-2 text-xs font-medium text-slate-600 hover:text-slate-900 transition-colors"
         >
           <ArrowLeft className="w-4 h-4" />
           <span>Back to Website</span>
         </Link>
-
-        <div className="flex items-center space-x-2">
-          <span className="w-2 h-2 rounded-full bg-[#C59B27] animate-pulse"></span>
-          <span className="text-[11px] font-mono uppercase tracking-widest text-slate-400">
-            Invite-Gated Registration
-          </span>
-        </div>
       </header>
 
-      {/* Main Signup Form Card */}
+      {/* Main Card */}
       <main className="w-full max-w-lg mx-auto my-auto py-8">
-        <div className="bg-[#0D1829]/95 border border-slate-800/90 rounded-3xl p-6 sm:p-8 shadow-2xl backdrop-blur-xl relative overflow-hidden">
+        <div className="bg-white border border-slate-200/90 rounded-2xl p-6 sm:p-8 shadow-xl shadow-slate-200/60 relative overflow-hidden">
           
-          {/* Subtle gold luxury ambient accent */}
-          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-transparent via-[#C59B27] to-transparent opacity-80" />
+          {/* Subtle gold accent top bar */}
+          <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#C59B27]/40 via-[#C59B27] to-[#C59B27]/40" />
 
-          {/* Brand & Crest Header */}
-          <div className="text-center mb-7">
-            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-[#13233D] to-[#0A1424] border border-[#C59B27]/40 flex items-center justify-center mx-auto mb-4 shadow-lg shadow-black/40">
-              <ShieldCheck className="w-7 h-7 text-[#C59B27]" />
+          {/* Official Brand Logo & Header */}
+          <div className="text-center mb-7 pt-2">
+            <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 shadow-xs flex items-center justify-center p-2 mx-auto mb-3">
+              <img
+                src="/logo.png"
+                onError={(e) => { e.currentTarget.src = "/logo-icon.svg"; }}
+                alt="GrabMyKey"
+                className="w-full h-full object-contain"
+              />
             </div>
 
-            <h1 className="font-serif text-2xl sm:text-3xl font-bold tracking-[0.15em] text-white">
-              GRABMYKEY
+            <div
+              className="text-xl font-extrabold tracking-tight font-serif leading-none flex items-center justify-center gap-1 text-slate-900"
+              style={{ fontFamily: "'Playfair Display', Georgia, serif" }}
+            >
+              <span>GRAB</span>
+              <span className="text-[#C59B27]">MY</span>
+              <span>KEY</span>
+            </div>
+            <span className="text-[9px] font-bold text-[#C59B27] uppercase tracking-widest font-sans leading-tight mt-1 block">
+              YOUR TRUSTED REAL ESTATE PARTNER
+            </span>
+
+            <h1 className="text-xl font-bold text-slate-900 mt-5">
+              {isPendingApproval ? 'Request Submitted' : 'Create Admin Account'}
             </h1>
-
-            <div className="inline-flex items-center space-x-1.5 mt-2 px-3 py-1 rounded-full bg-[#C59B27]/10 border border-[#C59B27]/30 text-[#C59B27] text-[10px] font-bold tracking-widest uppercase font-mono">
-              <span>ADMIN PORTAL • EXECUTIVE REGISTRATION</span>
-            </div>
-
-            <p className="text-xs text-slate-400 mt-3 max-w-sm mx-auto leading-relaxed">
-              Create an authorized administrative profile to manage Mangaluru real estate inventory, legal checklists, and inbound acquisitions.
+            <p className="text-xs text-slate-500 mt-1.5 leading-relaxed max-w-sm mx-auto">
+              {isPendingApproval
+                ? 'Your registration has been received and is awaiting administrator verification.'
+                : 'Register an administrative profile to access the GrabMyKey management console.'}
             </p>
           </div>
 
-          {/* Error Banner */}
-          {errorMessage && (
-            <div className="mb-6 p-3.5 rounded-xl bg-red-950/60 border border-red-800 text-red-200 text-xs flex items-start space-x-2.5 animate-fadeIn">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span className="leading-relaxed font-medium">{errorMessage}</span>
-            </div>
-          )}
-
-          {/* Success Banner */}
-          {successMessage && (
-            <div className="mb-6 p-3.5 rounded-xl bg-emerald-950/60 border border-emerald-800 text-emerald-200 text-xs flex items-center space-x-2.5 animate-fadeIn">
-              <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-              <span className="leading-relaxed font-medium">{successMessage}</span>
-            </div>
-          )}
-
-          {/* Signup Form */}
-          <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {/* Full Name */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Full Administrative Name
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <User className="w-4 h-4" />
-                </div>
-                <input
-                  type="text"
-                  required
-                  autoFocus
-                  placeholder="e.g., Executive Administrator"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
-                />
-              </div>
-            </div>
-
-            {/* Email Field */}
-            <div className="space-y-1.5">
-              <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                Official Administrative Email
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <Mail className="w-4 h-4" />
-                </div>
-                <input
-                  type="email"
-                  required
-                  placeholder="admin@grabmykey.in"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
-                />
-              </div>
-            </div>
-
-            {/* Password & Confirm Password Grid */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
-              
-              {/* Password */}
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                  Master Password
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                    <Lock className="w-4 h-4" />
-                  </div>
-                  <input
-                    type={showPassword ? 'text' : 'password'}
-                    required
-                    placeholder="Min. 8 characters"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-sans"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
+          {/* Pending Approval Success State */}
+          {isPendingApproval ? (
+            <div className="space-y-6 text-center py-4 animate-fadeIn">
+              <div className="w-16 h-16 rounded-full bg-amber-50 border border-amber-200 flex items-center justify-center mx-auto text-amber-600 shadow-xs">
+                <Clock className="w-8 h-8" />
               </div>
 
-              {/* Confirm Password */}
-              <div className="space-y-1.5">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                  Confirm Password
-                </label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                    <Lock className="w-4 h-4" />
-                  </div>
-                  <input
-                    type={showConfirmPassword ? 'text' : 'password'}
-                    required
-                    placeholder="Re-enter password"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className={`w-full bg-[#08101E] border rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none transition-all font-sans ${
-                      isMatch === false
-                        ? 'border-red-500 focus:ring-1 focus:ring-red-500'
-                        : isMatch === true
-                        ? 'border-emerald-500 focus:ring-1 focus:ring-emerald-500'
-                        : 'border-slate-700/80 focus:border-[#C59B27]'
-                    }`}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
-                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
-                    title={showConfirmPassword ? 'Hide password' : 'Show password'}
-                  >
-                    {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                  </button>
-                </div>
+              <div className="space-y-2">
+                <h2 className="text-base font-semibold text-slate-900">
+                  Awaiting Administrator Approval
+                </h2>
+                <p className="text-xs text-slate-600 leading-relaxed max-w-md mx-auto">
+                  Your registration request for <strong className="text-slate-800">{registeredEmail}</strong> has been submitted. An existing administrator must approve your account before you can log in.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-xl bg-slate-50 border border-slate-200 text-left text-xs text-slate-600 space-y-1">
+                <div className="font-semibold text-slate-800">What happens next?</div>
+                <div>1. An existing administrator will review your account request.</div>
+                <div>2. Once approved, you can sign in directly with your email and password.</div>
+              </div>
+
+              <div className="pt-2">
+                <Link
+                  to="/admin/login"
+                  className="inline-flex items-center justify-center w-full bg-[#0F172A] hover:bg-[#1E293B] text-white font-semibold py-3 rounded-xl text-xs sm:text-sm transition-all shadow-md"
+                >
+                  Return to Sign In
+                </Link>
               </div>
             </div>
+          ) : (
+            <>
+              {/* Error Banner */}
+              {errorMessage && (
+                <div className="mb-5 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs flex items-start space-x-2.5">
+                  <AlertCircle className="w-4 h-4 text-red-500 shrink-0 mt-0.5" />
+                  <span className="leading-relaxed font-medium">{errorMessage}</span>
+                </div>
+              )}
 
-            {/* Password Strength Indicator & Match Badge */}
-            {password && (
-              <div className="p-3 bg-[#08101E] rounded-xl border border-slate-800 space-y-2">
-                <div className="flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400">Password Strength:</span>
-                  <span className="font-semibold text-white font-mono">{passwordStrength.label}</span>
-                </div>
-                <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                  <div className={`h-full ${passwordStrength.color} ${passwordStrength.width} transition-all duration-300`} />
-                </div>
+              {/* Signup Form */}
+              <form onSubmit={handleSubmit} className="space-y-4">
                 
-                {confirmPassword && (
-                  <div className="flex items-center space-x-1.5 pt-1 text-[11px]">
-                    {isMatch ? (
-                      <span className="text-emerald-400 flex items-center space-x-1 font-medium">
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Passwords match securely</span>
-                      </span>
-                    ) : (
-                      <span className="text-red-400 flex items-center space-x-1 font-medium">
-                        <AlertCircle className="w-3.5 h-3.5" />
-                        <span>Passwords do not match</span>
-                      </span>
+                {/* Full Name */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <User className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="text"
+                      required
+                      autoFocus
+                      placeholder="Your full name"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* Email Field */}
+                <div className="space-y-1.5">
+                  <label className="block text-xs font-semibold text-slate-700">
+                    Official Administrative Email
+                  </label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <Mail className="w-4 h-4" />
+                    </div>
+                    <input
+                      type="email"
+                      required
+                      placeholder="admin@grabmykey.in"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-sans"
+                    />
+                  </div>
+                </div>
+
+                {/* Password & Confirm Password Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                  
+                  {/* Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Password
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                      <input
+                        type={showPassword ? 'text' : 'password'}
+                        required
+                        placeholder="••••••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                        className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-sans tracking-wider"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Confirm Password */}
+                  <div className="space-y-1.5">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Confirm Password
+                    </label>
+                    <div className="relative">
+                      <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                        <Lock className="w-4 h-4" />
+                      </div>
+                      <input
+                        type={showConfirmPassword ? 'text' : 'password'}
+                        required
+                        placeholder="••••••••••••"
+                        value={confirmPassword}
+                        onChange={(e) => setConfirmPassword(e.target.value)}
+                        className={`w-full bg-slate-50/80 border rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none transition-all font-sans tracking-wider ${
+                          isMatch === false
+                            ? 'border-red-400 focus:ring-2 focus:ring-red-200'
+                            : isMatch === true
+                            ? 'border-emerald-500 focus:ring-2 focus:ring-emerald-200'
+                            : 'border-slate-300 focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20'
+                        }`}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                        title={showConfirmPassword ? 'Hide password' : 'Show password'}
+                      >
+                        {showConfirmPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Password Strength Indicator & Match Badge */}
+                {password && (
+                  <div className="p-3 bg-slate-50 rounded-xl border border-slate-200 space-y-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="text-slate-500">Password Strength:</span>
+                      <span className="font-semibold text-slate-700">{passwordStrength.label}</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-200 rounded-full overflow-hidden">
+                      <div className={`h-full ${passwordStrength.color} ${passwordStrength.width} transition-all duration-300`} />
+                    </div>
+                    
+                    {confirmPassword && (
+                      <div className="flex items-center space-x-1.5 pt-1 text-xs">
+                        {isMatch ? (
+                          <span className="text-emerald-700 flex items-center space-x-1 font-medium">
+                            <Check className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Passwords match</span>
+                          </span>
+                        ) : (
+                          <span className="text-red-600 flex items-center space-x-1 font-medium">
+                            <AlertCircle className="w-3.5 h-3.5" />
+                            <span>Passwords do not match</span>
+                          </span>
+                        )}
+                      </div>
                     )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Admin Invite / Secret Key */}
-            <div className="space-y-1.5 pt-1">
-              <div className="flex items-center justify-between">
-                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-300">
-                  Administrative Invite / Secret Key
-                </label>
-                <span className="text-[10px] text-[#C59B27] font-mono">
-                  Default: GMK-ADMIN-2026
-                </span>
-              </div>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-500">
-                  <KeyRound className="w-4 h-4" />
+                {/* Admin Invite Key */}
+                <div className="space-y-1.5 pt-1">
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-slate-700">
+                      Admin Invite Key
+                    </label>
+                  </div>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
+                      <KeyRound className="w-4 h-4" />
+                    </div>
+                    <input
+                      type={showInviteKey ? 'text' : 'password'}
+                      placeholder="••••••••••••"
+                      value={inviteKey}
+                      onChange={(e) => setInviteKey(e.target.value)}
+                      className="w-full bg-slate-50/80 border border-slate-300 rounded-xl pl-10 pr-10 py-2.5 text-xs sm:text-sm text-slate-900 placeholder-slate-400 focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all font-mono tracking-wider"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowInviteKey(!showInviteKey)}
+                      className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                      title={showInviteKey ? 'Hide key' : 'Show key'}
+                    >
+                      {showInviteKey ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                    </button>
+                  </div>
+                  <span className="text-[11px] text-slate-500 block leading-tight">
+                    Required to authorize new administrative accounts. Contact an administrator if you need an invite key.
+                  </span>
                 </div>
-                <input
-                  type="text"
-                  placeholder="Enter authorized key (e.g., GMK-ADMIN-2026)"
-                  value={inviteKey}
-                  onChange={(e) => setInviteKey(e.target.value)}
-                  className="w-full bg-[#08101E] border border-slate-700/80 rounded-xl pl-10 pr-4 py-2.5 text-xs sm:text-sm text-white placeholder-slate-500 focus:outline-none focus:border-[#C59B27] focus:ring-1 focus:ring-[#C59B27]/40 transition-all font-mono"
-                />
+
+                {/* Submit Button */}
+                <button
+                  type="submit"
+                  disabled={isLoading || (confirmPassword && !isMatch)}
+                  className="w-full bg-[#0F172A] hover:bg-[#1E293B] active:bg-[#020617] disabled:opacity-50 text-white font-semibold py-3 rounded-xl text-xs sm:text-sm transition-all shadow-md shadow-slate-900/10 flex items-center justify-center space-x-2 cursor-pointer mt-3"
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-[#C59B27]" />
+                      <span>Submitting Request...</span>
+                    </>
+                  ) : (
+                    <span>Request Admin Access</span>
+                  )}
+                </button>
+              </form>
+
+              {/* Navigation to Login */}
+              <div className="mt-7 pt-5 border-t border-slate-200 text-center">
+                <p className="text-xs text-slate-500">
+                  Already have an account?{' '}
+                  <Link
+                    to="/admin/login"
+                    className="font-semibold text-[#B8860B] hover:text-[#9A7007] underline underline-offset-4 transition-colors"
+                  >
+                    Sign In
+                  </Link>
+                </p>
               </div>
-              <span className="text-[10px] text-slate-500 block leading-tight">
-                Required to authorize new administrative profiles. Contact superadmin if you need an access key.
-              </span>
-            </div>
-
-            {/* Submit Button */}
-            <button
-              type="submit"
-              disabled={isLoading || (confirmPassword && !isMatch)}
-              className="w-full bg-gradient-to-r from-[#B8860B] via-[#C59B27] to-[#D4AF37] hover:brightness-110 active:brightness-95 disabled:opacity-50 text-slate-950 font-bold py-3.5 rounded-xl text-xs uppercase tracking-widest transition-all shadow-lg shadow-black/40 flex items-center justify-center space-x-2 cursor-pointer mt-3"
-            >
-              {isLoading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Registering Profile...</span>
-                </>
-              ) : (
-                <span>Initialize Administrator Profile</span>
-              )}
-            </button>
-          </form>
-
-          {/* Navigation to Login */}
-          <div className="mt-7 pt-5 border-t border-slate-800 text-center space-y-2">
-            <p className="text-xs text-slate-400">
-              Already hold an executive profile?{' '}
-              <Link
-                to="/admin/login"
-                className="font-bold text-[#C59B27] hover:text-[#e0b945] underline underline-offset-4 transition-colors"
-              >
-                Sign in to Admin Portal →
-              </Link>
-            </p>
-
-            <p className="text-[10px] text-slate-500 font-mono">
-              Strict RBAC Protocol • GrabMyKey Mangaluru Operations Suite
-            </p>
-          </div>
+            </>
+          )}
         </div>
       </main>
 
       {/* Footer Notice */}
-      <footer className="text-center py-4 text-[11px] text-slate-500 font-mono">
-        © 2026 GrabMyKey. Authorized administrative registration portal.
+      <footer className="text-center py-4 text-xs text-slate-500">
+        © 2026 GrabMyKey. Authorized administrative personnel only.
       </footer>
     </div>
   );

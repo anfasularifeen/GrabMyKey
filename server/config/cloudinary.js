@@ -71,7 +71,7 @@ export const uploadImagesToCloudinary = async (imagesArray, folder = 'grabmykey/
 
 /**
  * Extract Cloudinary public_id from a secure URL
- * Example: https://res.cloudinary.com/cloudname/image/upload/v12345/grabmykey/properties/sample.jpg
+ * Example: https://res.cloudinary.com/cloudname/image/upload/v1690000000/grabmykey/properties/sample.jpg
  * Returns: grabmykey/properties/sample
  */
 export const extractPublicId = (url) => {

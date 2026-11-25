@@ -7,7 +7,7 @@ import {
   FileText, ShieldCheck, Layers, Car,
   FileCheck, ArrowUpRight, Play, FolderCog, Tag, Filter,
   ChevronUp, ChevronDown, Footprints, Train, Plane,
-  TrendingUp, Image as ImageIcon, Star
+  TrendingUp, Image as ImageIcon, Star, Clock, KeyRound, AlertCircle, EyeOff
 } from 'lucide-react';
 
 import {
@@ -25,12 +25,20 @@ import {
   updatePreset,
   deletePreset,
   seedDefaultPresets,
-  checkServerHealth
+  checkServerHealth,
+  fetchAdmins,
+  approveAdmin,
+  rejectAdmin,
+  deleteAdmin,
+  fetchInviteKey,
+  updateInviteKey,
+  getStoredAdminUser
 } from './api';
 import { DEFAULT_MASTER_PRESETS, ASSET_SPEC_PRESETS, getAssetSpecPresets } from './defaultPresets';
 import Navbar from './components/admin/Navbar';
 import Sidebar from './components/admin/Sidebar';
 import AddCustomItemModal from './components/AddCustomItemModal';
+import { toast } from 'sonner';
 
 
 
@@ -143,6 +151,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const navigate = useNavigate();
   const location = useLocation();
 
+  // Dynamically derive base admin path to support both /admin and legacy /manage-345
+  const baseAdminPath = location.pathname.startsWith('/manage-345') ? '/manage-345' : '/admin';
+
   // Active view tab state derived from URL or internal selection
   const isPublishRoute = location.pathname.includes('publish-listing');
   const isMasterPresetsRoute = location.pathname.includes('master-presets');
@@ -193,6 +204,16 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     status: 'Verified'
   });
 
+  // Admin Access & Security state
+  const [adminsList, setAdminsList] = useState([]);
+  const [adminsLoading, setAdminsLoading] = useState(false);
+  const [currentInviteKey, setCurrentInviteKey] = useState('');
+  const [inviteKeyInput, setInviteKeyInput] = useState('');
+  const [showConsoleInviteKey, setShowConsoleInviteKey] = useState(false);
+  const [inviteKeySaving, setInviteKeySaving] = useState(false);
+  const [securityMessage, setSecurityMessage] = useState(null);
+  const currentAdminUser = getStoredAdminUser();
+
   // Hero Featured Video & Settings state
   const [heroSettings, setHeroSettings] = useState({
     heroFeaturedPropertyId: '',
@@ -210,6 +231,40 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     property: null,
     isDeleting: false
   });
+
+  // Dedicated Clean Confirmation Modal State (Replacing native window.confirm)
+  const [confirmModalState, setConfirmModalState] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+    isDestructive: true,
+    onConfirm: null
+  });
+
+  const requestConfirmation = ({
+    title,
+    message,
+    confirmText = 'Confirm',
+    cancelText = 'Cancel',
+    isDestructive = true,
+    onConfirm
+  }) => {
+    setConfirmModalState({
+      isOpen: true,
+      title,
+      message,
+      confirmText,
+      cancelText,
+      isDestructive,
+      onConfirm
+    });
+  };
+
+  const handleCloseConfirmModal = () => {
+    setConfirmModalState(prev => ({ ...prev, isOpen: false, onConfirm: null }));
+  };
 
   // Dynamic feature selector based on category and presets (defaults to false / Not Included for new listings)
   const getFeaturesForCategory = (cat, defaultAvailable = false) => {
@@ -267,7 +322,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
   const handleSavePreset = async (e) => {
     e.preventDefault();
     if (!presetFormData.title || !presetFormData.title.trim()) {
-      alert('Please enter a title / document name.');
+      toast.error('Please enter a title / document name.');
       return;
     }
 
@@ -280,6 +335,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         } else {
           setPresets(prev => prev.map(p => (String(p._id) === String(editingPresetId) || String(p.id) === String(editingPresetId)) ? { ...p, ...presetFormData } : p));
         }
+        toast.success('Master preset updated successfully.');
       } else {
         const res = await createPreset(presetFormData);
         if (res?.success && res.data) {
@@ -288,6 +344,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
           const fallbackItem = { ...presetFormData, _id: `local-${Date.now()}` };
           setPresets(prev => [...prev, fallbackItem]);
         }
+        toast.success('New master preset created.');
       }
       setShowPresetModal(false);
     } catch (err) {
@@ -297,22 +354,30 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       } else {
         setPresets(prev => [...prev, { ...presetFormData, _id: `local-${Date.now()}` }]);
       }
+      toast.info('Preset saved locally.');
       setShowPresetModal(false);
     } finally {
       setIsSavingPreset(false);
     }
   };
 
-  const handleDeletePreset = async (id) => {
-    if (!window.confirm('Delete this master preset? Listings already published will retain their existing records.')) {
-      return;
-    }
-    try {
-      await deletePreset(id);
-    } catch (err) {
-      console.warn('Deleted preset locally:', err.message);
-    }
-    setPresets(prev => prev.filter(p => String(p._id) !== String(id) && String(p.id) !== String(id)));
+  const handleDeletePreset = (id) => {
+    requestConfirmation({
+      title: 'Delete Master Preset',
+      message: 'Delete this master preset? Listings already published will retain their existing records.',
+      confirmText: 'Delete Preset',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await deletePreset(id);
+          toast.success('Master preset deleted.');
+        } catch (err) {
+          console.warn('Deleted preset locally:', err.message);
+          toast.info('Preset removed locally.');
+        }
+        setPresets(prev => prev.filter(p => String(p._id) !== String(id) && String(p.id) !== String(id)));
+      }
+    });
   };
 
   const handleTogglePresetActive = async (item) => {
@@ -326,23 +391,28 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     }
   };
 
-  const handleSeedDefaults = async () => {
-    if (!window.confirm('Reset master presets to statutory GrabMyKey defaults? Custom presets will be refreshed.')) {
-      return;
-    }
-    try {
-      const res = await seedDefaultPresets();
-      if (res?.success && Array.isArray(res.data)) {
-        setPresets(res.data);
-      } else {
-        setPresets(DEFAULT_MASTER_PRESETS);
+  const handleSeedDefaults = () => {
+    requestConfirmation({
+      title: 'Reset Master Presets',
+      message: 'Reset master presets to statutory GrabMyKey defaults? Custom presets will be refreshed.',
+      confirmText: 'Reset Defaults',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await seedDefaultPresets();
+          if (res?.success && Array.isArray(res.data)) {
+            setPresets(res.data);
+          } else {
+            setPresets(DEFAULT_MASTER_PRESETS);
+          }
+          toast.success('Master presets reset to statutory defaults successfully!');
+        } catch (err) {
+          console.warn('Using local default master presets:', err.message);
+          setPresets(DEFAULT_MASTER_PRESETS);
+          toast.info('Master presets reset to statutory defaults.');
+        }
       }
-      alert('Master presets reset to statutory defaults successfully!');
-    } catch (err) {
-      console.warn('Using local default master presets:', err.message);
-      setPresets(DEFAULT_MASTER_PRESETS);
-      alert('Master presets reset to statutory defaults.');
-    }
+    });
   };
 
   // Load database data on mount
@@ -389,10 +459,104 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       } catch (presetErr) {
         console.warn('Using default master presets:', presetErr.message);
       }
+
+      try {
+        await loadAdminsAndInviteKey();
+      } catch (adminErr) {
+        console.warn('Could not load admins list:', adminErr.message);
+      }
     } catch (err) {
       console.warn('Admin running on cached state:', err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadAdminsAndInviteKey = async () => {
+    setAdminsLoading(true);
+    try {
+      const [adminsRes, keyRes] = await Promise.allSettled([
+        fetchAdmins(),
+        fetchInviteKey()
+      ]);
+      if (adminsRes.status === 'fulfilled' && adminsRes.value?.success && Array.isArray(adminsRes.value.admins)) {
+        setAdminsList(adminsRes.value.admins);
+      }
+      if (keyRes.status === 'fulfilled' && keyRes.value?.success && keyRes.value.inviteKey) {
+        setCurrentInviteKey(keyRes.value.inviteKey);
+        setInviteKeyInput(keyRes.value.inviteKey);
+      }
+    } catch (err) {
+      console.warn('Error loading admin security directory:', err);
+    } finally {
+      setAdminsLoading(false);
+    }
+  };
+
+  const handleApproveAdmin = async (id) => {
+    try {
+      const res = await approveAdmin(id);
+      if (res?.success) {
+        setSecurityMessage({ type: 'success', text: res.message || 'Administrator account approved.' });
+        await loadAdminsAndInviteKey();
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to approve administrator.' });
+    }
+  };
+
+  const handleRejectAdmin = async (id) => {
+    try {
+      const res = await rejectAdmin(id);
+      if (res?.success) {
+        setSecurityMessage({ type: 'success', text: res.message || 'Administrator account rejected.' });
+        await loadAdminsAndInviteKey();
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to reject administrator.' });
+    }
+  };
+
+  const handleDeleteAdmin = (id, name) => {
+    requestConfirmation({
+      title: 'Remove Administrator',
+      message: `Are you sure you want to remove administrator "${name}"? This action will revoke all access for this account.`,
+      confirmText: 'Remove Admin',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          const res = await deleteAdmin(id);
+          if (res?.success) {
+            setSecurityMessage({ type: 'success', text: res.message || 'Administrator removed.' });
+            toast.success(`Administrator ${name} removed.`);
+            await loadAdminsAndInviteKey();
+          }
+        } catch (err) {
+          const errMsg = err.response?.data?.message || err.message || 'Failed to remove administrator.';
+          setSecurityMessage({ type: 'error', text: errMsg });
+          toast.error(errMsg);
+        }
+      }
+    });
+  };
+
+  const handleSaveInviteKey = async (e) => {
+    e.preventDefault();
+    if (!inviteKeyInput || inviteKeyInput.trim().length < 6) {
+      setSecurityMessage({ type: 'error', text: 'Invite key must be at least 6 characters long.' });
+      return;
+    }
+    setInviteKeySaving(true);
+    try {
+      const res = await updateInviteKey(inviteKeyInput.trim());
+      if (res?.success) {
+        setCurrentInviteKey(res.inviteKey);
+        setSecurityMessage({ type: 'success', text: 'Dynamic invite key updated successfully.' });
+      }
+    } catch (err) {
+      setSecurityMessage({ type: 'error', text: err.response?.data?.message || err.message || 'Failed to update invite key.' });
+    } finally {
+      setInviteKeySaving(false);
     }
   };
 
@@ -412,14 +576,15 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   // Navigation handlers
   const handleTabSwitch = (tabName) => {
-    if (tabName === 'publish-listing') {
-      navigate('/manage-345/publish-listing');
-    } else if (tabName === 'master-presets') {
-      navigate('/manage-345/master-presets');
+    const targetTab = tabName === 'hero' ? 'hero-settings' : tabName;
+    if (targetTab === 'publish-listing') {
+      navigate(`${baseAdminPath}/publish-listing`);
+    } else if (targetTab === 'master-presets') {
+      navigate(`${baseAdminPath}/master-presets`);
     } else {
-      setInternalTab(tabName);
-      if (location.pathname !== '/manage-345') {
-        navigate('/manage-345');
+      setInternalTab(targetTab);
+      if (location.pathname !== baseAdminPath) {
+        navigate(baseAdminPath);
       }
     }
   };
@@ -428,7 +593,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setEditingPropertyId(null);
     setFormData(INITIAL_FORM_STATE);
     setFormStep(1);
-    navigate('/manage-345/publish-listing');
+    navigate(`${baseAdminPath}/publish-listing`);
   };
 
   const handleCancelForm = () => {
@@ -531,7 +696,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
       localityGrowthDriver: prop.investmentAnalysis?.localityGrowthDriver || 'High-growth corridor with infrastructure development'
     });
     setFormStep(1);
-    navigate('/manage-345/publish-listing');
+    navigate(`${baseAdminPath}/publish-listing`);
   };
 
   // CRUD Property actions & Custom Confirmation Modal
@@ -627,14 +792,23 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
     setLeads(prev => prev.map(l => ((l._id || l.id) === leadId ? { ...l, status: newStatus } : l)));
   };
 
-  const handleDeleteLead = async (leadId) => {
-    if (!window.confirm('Remove this lead inquiry from the queue?')) return;
-    try {
-      await deleteLead(leadId);
-    } catch (err) {
-      console.warn('Backend lead delete error:', err.message);
-    }
-    setLeads(prev => prev.filter(l => (l._id || l.id) !== leadId));
+  const handleDeleteLead = (leadId) => {
+    requestConfirmation({
+      title: 'Remove Inbound Lead',
+      message: 'Remove this lead inquiry from the queue?',
+      confirmText: 'Remove Lead',
+      isDestructive: true,
+      onConfirm: async () => {
+        try {
+          await deleteLead(leadId);
+          toast.success('Lead inquiry removed.');
+        } catch (err) {
+          console.warn('Backend lead delete error:', err.message);
+          toast.info('Lead inquiry removed locally.');
+        }
+        setLeads(prev => prev.filter(l => (l._id || l.id) !== leadId));
+      }
+    });
   };
 
   // Hero Featured Video Handlers
@@ -673,10 +847,11 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         window.dispatchEvent(new CustomEvent('grabmykey_settings_updated', { detail: res.data }));
         setHeroSaveSuccess(true);
         setTimeout(() => setHeroSaveSuccess(false), 3000);
+        toast.success('Hero Video settings updated successfully.');
         if (onDataUpdated) onDataUpdated();
       }
     } catch (err) {
-      alert('Failed to save Hero Settings: ' + err.message);
+      toast.error('Failed to save Hero Settings: ' + err.message);
     } finally {
       setIsSavingHeroSettings(false);
     }
@@ -748,12 +923,19 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   const handleResetDefaultFeatures = () => {
     const cat = formData.category || 'Villa';
-    if (window.confirm(`Reset feature matrix to standard ${cat} master template?`)) {
-      setFormData(prev => ({
-        ...prev,
-        componentsMatrix: getFeaturesForCategory(cat)
-      }));
-    }
+    requestConfirmation({
+      title: 'Reset Feature Matrix',
+      message: `Reset feature matrix to standard ${cat} master template? Any custom modifications will be reset.`,
+      confirmText: 'Apply Template',
+      isDestructive: false,
+      onConfirm: () => {
+        setFormData(prev => ({
+          ...prev,
+          componentsMatrix: getFeaturesForCategory(cat)
+        }));
+        toast.success(`Feature matrix reset to ${cat} template.`);
+      }
+    });
   };
 
   // Manual Strategic Transit Handlers
@@ -871,7 +1053,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
 
   const handleConfirmCustomModal = () => {
     if (!customItemModal.title.trim()) {
-      alert('Please enter a valid title.');
+      toast.error('Please enter a valid title.');
       return;
     }
     if (customItemModal.type === 'FEATURE') {
@@ -1097,14 +1279,14 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         const updatedDoc = res?.data || propertyPayload;
         setProperties(prev => prev.map(p => (String(p._id || p.id) === String(editingPropertyId) ? { ...p, ...propertyPayload, ...updatedDoc } : p)));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
-        alert(`Listing #${editingPropertyId} (${propertyPayload.title}) updated successfully!`);
+        toast.success(`Listing #${editingPropertyId} (${propertyPayload.title}) updated successfully!`);
       } else {
         const res = await createProperty(propertyPayload);
         const newRecord = res?.data || { ...propertyPayload, _id: String(Date.now()), id: String(Date.now()) };
         setProperties(prev => [newRecord, ...prev]);
         window.dispatchEvent(new CustomEvent('grabmykey_property_created', { detail: newRecord }));
         window.dispatchEvent(new CustomEvent('grabmykey_properties_updated'));
-        alert(`New property listing "${newRecord.title}" published live to catalog!`);
+        toast.success(`New property listing "${newRecord.title}" published live to catalog!`);
       }
     } catch (err) {
       console.error('API submission error:', err);
@@ -1116,9 +1298,9 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         err.message?.includes('connection refused')
       );
       if (isServerOffline) {
-        alert("Backend server is offline. Please start Node server on port 5000.");
+        toast.warning("Backend server is offline. Please start Node server on port 5000.");
       } else {
-        alert(`Submission error: ${err.message || 'Could not connect to backend server'}`);
+        toast.error(`Submission error: ${err.message || 'Could not connect to backend server'}`);
       }
     } finally {
       // Clear editing ID and form state so future creates don't overwrite or duplicate
@@ -1268,6 +1450,7 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
         propertiesCount={properties.length}
         newLeadsCount={leads.filter(l => l.status === 'New Inquiry').length}
         presetsCount={presets.length}
+        pendingAdminsCount={adminsList.filter(a => a.status === 'pending').length}
         onExit={onExit || (() => navigate('/'))}
       />
 
@@ -3699,6 +3882,303 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
               </div>
             )}
 
+            {/* =============================================================== */}
+            {/* VIEW 7: ADMIN ACCESS & SECURITY MANAGER                          */}
+            {/* =============================================================== */}
+            {activeTab === 'admin-security' && (
+              <div className="space-y-8 w-full max-w-6xl mx-auto pb-12">
+
+                {/* Header Title & Refresh */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+                  <div>
+                    <div className="flex items-center space-x-2 mb-1">
+                      <ShieldCheck className="w-6 h-6 text-[#b8860b]" />
+                      <h1 className="text-2xl lg:text-3xl font-serif font-bold text-[#0a1d37] tracking-tight">
+                        Admin Access & Security
+                      </h1>
+                    </div>
+                    <p className="text-xs text-slate-500">
+                      Manage administrative personnel, approve access requests, and rotate the dynamic invite registration key.
+                    </p>
+                  </div>
+                  <button
+                    onClick={loadAdminsAndInviteKey}
+                    disabled={adminsLoading}
+                    className="inline-flex items-center space-x-1.5 text-xs text-slate-700 hover:text-[#0a1d37] border border-slate-300 bg-white hover:bg-slate-50 px-3 py-1.5 rounded-xl shadow-xs transition-colors cursor-pointer"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${adminsLoading ? 'animate-spin text-[#b8860b]' : ''}`} />
+                    <span>Refresh Directory</span>
+                  </button>
+                </div>
+
+                {/* Status / Alert Banner */}
+                {securityMessage && (
+                  <div className={`p-4 rounded-xl border text-xs flex items-center justify-between animate-fadeIn ${
+                    securityMessage.type === 'success'
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                      : 'bg-red-50 border-red-200 text-red-800'
+                  }`}>
+                    <div className="flex items-center space-x-2">
+                      {securityMessage.type === 'success' ? (
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      ) : (
+                        <AlertCircle className="w-4 h-4 text-red-600 shrink-0" />
+                      )}
+                      <span className="font-medium">{securityMessage.text}</span>
+                    </div>
+                    <button
+                      onClick={() => setSecurityMessage(null)}
+                      className="text-slate-400 hover:text-slate-600 ml-4 cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                )}
+
+                {/* Dynamic Admin Invite Key Section */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-[#b8860b] shrink-0">
+                        <KeyRound className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <div className="flex items-center space-x-2">
+                          <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                            Dynamic Admin Invite Key
+                          </h2>
+                          {currentInviteKey && (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700">
+                              Active
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-500">
+                          Prospective administrators must supply this key when registering an account. Rotate periodically for enhanced security.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSaveInviteKey} className="max-w-xl flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                    <div className="relative flex-1">
+                      <input
+                        type={showConsoleInviteKey ? 'text' : 'password'}
+                        value={inviteKeyInput}
+                        onChange={(e) => setInviteKeyInput(e.target.value)}
+                        placeholder="Enter dynamic invite key (min. 6 characters)"
+                        className="w-full bg-slate-50 border border-slate-300 rounded-xl pl-4 pr-10 py-2.5 text-xs sm:text-sm text-slate-900 font-mono tracking-wider focus:bg-white focus:outline-none focus:border-[#C59B27] focus:ring-2 focus:ring-[#C59B27]/20 transition-all"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowConsoleInviteKey(!showConsoleInviteKey)}
+                        className="absolute inset-y-0 right-0 pr-3 flex items-center text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
+                        title={showConsoleInviteKey ? 'Hide key' : 'Show key'}
+                      >
+                        {showConsoleInviteKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+
+                    <button
+                      type="submit"
+                      disabled={inviteKeySaving || !inviteKeyInput || inviteKeyInput.trim().length < 6}
+                      className="bg-[#0a1d37] hover:bg-[#13233D] disabled:opacity-50 text-white font-semibold px-5 py-2.5 rounded-xl text-xs sm:text-sm transition-all shadow-xs flex items-center justify-center space-x-2 cursor-pointer shrink-0"
+                    >
+                      {inviteKeySaving ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
+                          <span>Saving...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Save className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Update Invite Key</span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+                </div>
+
+                {/* Pending Registration Requests */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-amber-50 border border-amber-200 flex items-center justify-center text-amber-700 shrink-0">
+                        <Clock className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                          Pending Registration Requests
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          New admin accounts awaiting verification from an active administrator.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className={`text-xs font-bold px-2.5 py-1 rounded-full ${
+                      adminsList.filter(a => a.status === 'pending').length > 0
+                        ? 'bg-amber-100 text-amber-900 border border-amber-200'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}>
+                      {adminsList.filter(a => a.status === 'pending').length} Pending
+                    </span>
+                  </div>
+
+                  {adminsList.filter(a => a.status === 'pending').length === 0 ? (
+                    <div className="py-8 text-center text-slate-400 text-xs">
+                      <CheckCircle2 className="w-8 h-8 mx-auto text-emerald-500/60 mb-2" />
+                      <p className="font-medium text-slate-600">No pending requests</p>
+                      <p className="text-slate-400 mt-0.5">All administrator registrations have been processed.</p>
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-slate-100">
+                      {adminsList.filter(a => a.status === 'pending').map((pendingAdmin) => (
+                        <div key={pendingAdmin._id || pendingAdmin.id} className="py-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                          <div className="space-y-1">
+                            <div className="flex items-center space-x-2">
+                              <span className="font-semibold text-sm text-[#0a1d37]">{pendingAdmin.name}</span>
+                              <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-amber-50 border border-amber-200 text-amber-800">
+                                Awaiting Approval
+                              </span>
+                            </div>
+                            <div className="text-xs text-slate-500 flex items-center space-x-3">
+                              <span>{pendingAdmin.email}</span>
+                              <span>•</span>
+                              <span>Requested {new Date(pendingAdmin.createdAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => handleApproveAdmin(pendingAdmin._id || pendingAdmin.id)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-semibold transition-all shadow-xs cursor-pointer"
+                            >
+                              <Check className="w-3.5 h-3.5" />
+                              <span>Approve Access</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleRejectAdmin(pendingAdmin._id || pendingAdmin.id)}
+                              className="inline-flex items-center space-x-1.5 px-3 py-1.5 bg-white hover:bg-red-50 text-red-600 border border-red-200 rounded-lg text-xs font-semibold transition-all cursor-pointer"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                              <span>Reject</span>
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Active Administrators Directory */}
+                <div className="bg-white border border-slate-200/90 shadow-sm rounded-2xl p-6">
+                  <div className="flex items-center justify-between pb-4 border-b border-slate-100 mb-5">
+                    <div className="flex items-center space-x-3">
+                      <div className="w-10 h-10 rounded-xl bg-slate-100 border border-slate-200 flex items-center justify-center text-slate-700 shrink-0">
+                        <Users className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <h2 className="font-serif font-bold text-base text-[#0a1d37]">
+                          Administrative Directory
+                        </h2>
+                        <p className="text-xs text-slate-500">
+                          All authorized system administrators and their operational status.
+                        </p>
+                      </div>
+                    </div>
+
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-full bg-slate-100 text-slate-700">
+                      {adminsList.filter(a => a.status !== 'pending').length} Total
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-slate-200 bg-slate-50/70 text-slate-600 font-semibold uppercase tracking-wider text-[10px]">
+                          <th className="py-3 px-4">Administrator</th>
+                          <th className="py-3 px-4">Role</th>
+                          <th className="py-3 px-4">Status</th>
+                          <th className="py-3 px-4">Last Login</th>
+                          <th className="py-3 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {adminsList.filter(a => a.status !== 'pending').map((admin) => {
+                          const isSelf = currentAdminUser && (admin._id === currentAdminUser.id || admin.id === currentAdminUser.id || admin.email === currentAdminUser.email);
+                          return (
+                            <tr key={admin._id || admin.id} className="hover:bg-slate-50/50 transition-colors">
+                              <td className="py-3 px-4">
+                                <div className="font-semibold text-slate-900 flex items-center space-x-1.5">
+                                  <span>{admin.name}</span>
+                                  {isSelf && (
+                                    <span className="text-[9px] font-bold px-1.5 py-0.2 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                      You
+                                    </span>
+                                  )}
+                                </div>
+                                <div className="text-slate-500 text-[11px]">{admin.email}</div>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  admin.role === 'superadmin'
+                                    ? 'bg-amber-100 text-amber-900 border border-amber-300'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}>
+                                  {admin.role || 'admin'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4">
+                                <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider ${
+                                  admin.status === 'approved'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : admin.status === 'rejected'
+                                    ? 'bg-red-50 text-red-700 border border-red-200'
+                                    : 'bg-amber-50 text-amber-700 border border-amber-200'
+                                }`}>
+                                  {admin.status || 'approved'}
+                                </span>
+                              </td>
+                              <td className="py-3 px-4 text-slate-500 font-mono text-[11px]">
+                                {admin.lastLogin
+                                  ? new Date(admin.lastLogin).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+                                  : 'Never'}
+                              </td>
+                              <td className="py-3 px-4 text-right">
+                                {admin.status === 'rejected' ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleApproveAdmin(admin._id || admin.id)}
+                                    className="text-emerald-700 hover:text-emerald-800 font-semibold text-xs px-2 py-1 rounded hover:bg-emerald-50 transition-colors mr-2 cursor-pointer"
+                                  >
+                                    Re-Approve
+                                  </button>
+                                ) : null}
+                                {!isSelf && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteAdmin(admin._id || admin.id, admin.name)}
+                                    className="text-slate-400 hover:text-red-600 p-1.5 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                                    title={`Remove ${admin.name}`}
+                                  >
+                                    <Trash2 className="w-4 h-4" />
+                                  </button>
+                                )}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
           </div>
         </main>
 
@@ -4053,6 +4533,65 @@ export default function AdminConsole({ onExit, onViewLiveProperty, onDataUpdated
                 ) : (
                   <span>Confirm Deletion</span>
                 )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DEDICATED CLEAN CONFIRMATION MODAL */}
+      {confirmModalState.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-[#0a1d37]/80 backdrop-blur-xs animate-in fade-in duration-150">
+          <div className="bg-white border border-slate-200 rounded-2xl max-w-md w-full p-6 shadow-2xl relative text-slate-800 animate-in zoom-in-95 duration-150">
+            {/* Top Close Button */}
+            <button
+              type="button"
+              onClick={handleCloseConfirmModal}
+              className="absolute top-4 right-4 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Icon & Message */}
+            <div className="mb-4">
+              <div className={`w-11 h-11 rounded-xl flex items-center justify-center mb-3 ${
+                confirmModalState.isDestructive
+                  ? 'bg-red-50 border border-red-200 text-red-600'
+                  : 'bg-amber-50 border border-amber-200 text-[#b8860b]'
+              }`}>
+                {confirmModalState.isDestructive ? <Trash2 className="w-5 h-5" /> : <AlertCircle className="w-5 h-5" />}
+              </div>
+              <h3 className="text-lg font-serif font-bold text-slate-900">
+                {confirmModalState.title}
+              </h3>
+              <p className="text-xs text-slate-600 mt-2 leading-relaxed">
+                {confirmModalState.message}
+              </p>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex items-center space-x-3 pt-2">
+              <button
+                type="button"
+                onClick={handleCloseConfirmModal}
+                className="flex-1 py-2.5 px-4 rounded-xl border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-semibold transition-colors cursor-pointer"
+              >
+                {confirmModalState.cancelText || 'Cancel'}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const cb = confirmModalState.onConfirm;
+                  handleCloseConfirmModal();
+                  if (cb) cb();
+                }}
+                className={`flex-1 py-2.5 px-4 rounded-xl text-white text-xs font-bold transition-colors cursor-pointer shadow-sm flex items-center justify-center space-x-1.5 ${
+                  confirmModalState.isDestructive
+                    ? 'bg-red-600 hover:bg-red-700'
+                    : 'bg-[#0a1d37] hover:bg-[#13233D]'
+                }`}
+              >
+                <span>{confirmModalState.confirmText || 'Confirm'}</span>
               </button>
             </div>
           </div>
